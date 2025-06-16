@@ -2025,8 +2025,8 @@ def plex_select_user():
                 break
 
         if server_resource:
-            plex = server_resource.connect()
-            token = plex._token
+            token = server_resource.accessToken or plex_account.authenticationToken
+            plex = PlexServer(baseurl or server_resource.connections[0].uri, token)
             os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
         else:
             # Fall back to any available server resource when the configured
@@ -2037,8 +2037,8 @@ def plex_select_user():
                 (r for r in plex_account.resources() if "server" in r.provides), None
             )
             if alt_resource:
-                plex = alt_resource.connect()
-                token = plex._token
+                token = alt_resource.accessToken or plex_account.authenticationToken
+                plex = PlexServer(baseurl or alt_resource.connections[0].uri, token)
                 os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
             else:
                 token = plex_account.authenticationToken
