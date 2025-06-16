@@ -2037,9 +2037,9 @@ def login_page():
                 if session.get("owned"):
                     if selected_user and selected_user != user:
                         owner_token = token
-                        role = {u: r for u, r, _ in session.get("users", [])}.get(selected_user)
-                        if role != "managed":
-                            token = account.user(selected_user).get_token(session.get("machine_id"))
+                        token = account.user(selected_user).get_token(
+                            session.get("machine_id")
+                        )
                         user = selected_user
                 else:
                     account_token = account.authenticationToken
