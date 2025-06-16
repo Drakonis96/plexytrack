@@ -81,6 +81,18 @@
                     <button type="submit" class="button primary">Finish</button>
                 </form>
             </section>
+            {% elif stage == 4 %}
+            <section class="card">
+                <h2>Plex Connection</h2>
+                {% if message %}
+                <div class="status-message {{ mtype }}">{{ message }}</div>
+                {% endif %}
+                <p><strong>Server:</strong> {{ server }}</p>
+                <p><strong>User:</strong> {{ username }}</p>
+                <form action="{{ url_for('clear_service', service='plex') }}" method="post">
+                    <button type="submit" class="button danger">Logout</button>
+                </form>
+            </section>
             {% endif %}
         </main>
 

@@ -1946,7 +1946,12 @@ def restore_backup(headers, data: dict) -> None:
 def login_page():
     """Interactive Plex login supporting managed accounts."""
     load_plex_tokens()
-    stage = session.get("stage", 1)
+    message = request.args.get("message")
+    mtype = request.args.get("mtype", "success") if message else None
+    stage = session.get("stage")
+    if stage is None:
+        stage = 4 if os.environ.get("PLEX_TOKEN") else 1
+        session["stage"] = stage
     error = None
 
     if stage == 1:
@@ -2033,12 +2038,24 @@ def login_page():
                     session.get("server_name"),
                     session.get("baseurl"),
                 )
-                session.clear()
-                return redirect(url_for("index", message="Plex login successful!", mtype="success"))
+                session["stage"] = 4
+                session["username"] = user
+                message = "Plex login successful!"
+                return redirect(url_for("login_page", message=message, mtype="success"))
             except Exception as exc:  # noqa: BLE001
                 error = f"Error saving tokens: {exc}"
 
         return render_template("login.html", stage=3, error=error, users=users)
+
+    if stage == 4:
+        return render_template(
+            "login.html",
+            stage=4,
+            username=os.environ.get("PLEX_USERNAME", session.get("username")),
+            server=os.environ.get("PLEX_SERVER", session.get("server_name")),
+            message=message,
+            mtype=mtype,
+        )
 
     session.clear()
     return redirect(url_for("login_page"))
@@ -2224,6 +2241,24 @@ def clear_service(service: str):
                 logger.error("Failed to remove Simkl token file: %s", exc)
         if SYNC_PROVIDER == "simkl":
             save_provider("none")
+    elif service == "plex":
+        for var in [
+            "PLEX_TOKEN",
+            "PLEX_OWNER_TOKEN",
+            "PLEX_ACCOUNT_TOKEN",
+            "PLEX_USERNAME",
+            "PLEX_SERVER",
+            "PLEX_BASEURL",
+        ]:
+            os.environ.pop(var, None)
+        if os.path.exists(PLEX_TOKEN_FILE):
+            try:
+                os.remove(PLEX_TOKEN_FILE)
+                logger.info("Removed Plex token file")
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to remove Plex token file: %s", exc)
+        session.clear()
+        return redirect(url_for("login_page"))
     return redirect(url_for("config_page"))
 
 
