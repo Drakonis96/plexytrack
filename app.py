@@ -1880,7 +1880,7 @@ def login_page():
             password = request.form.get("password", "").strip()
             code = request.form.get("code", "").strip() or None
             try:
-                account = MyPlexAccount.signin(email, password, code=code)
+                account = MyPlexAccount(email, password, code=code)
                 session["account_token"] = account.authenticationToken
                 session["username"] = account.username
                 servers = [s.name for s in account.servers()]
