@@ -30,6 +30,7 @@ The application expects the following API credentials:
 
 - `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
 - `PLEX_TOKEN` – your Plex authentication token.
+- `PLEX_USER_ID` – optional Plex account ID to sync (owner by default).
 - `TRAKT_CLIENT_ID` – client ID for your Trakt application (optional if only using Simkl).
 - `TRAKT_CLIENT_SECRET` – client secret from your Trakt application (optional if only using Simkl).
 - `SIMKL_CLIENT_ID` – client ID for your Simkl application (optional if only using Trakt).
@@ -109,6 +110,8 @@ the application will trigger an immediate sync whenever an event is received.
 ```
 PLEX_BASEURL=http://localhost:32400
 PLEX_TOKEN=YOUR_PLEX_TOKEN
+# Optional: sync specific Plex account ID
+# PLEX_USER_ID=12345
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID

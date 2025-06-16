@@ -127,6 +127,8 @@ SYNC_PROVIDER = "none"  # trakt | simkl | none
 PROVIDER_FILE = "provider.json"
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
+PLEX_USER_FILE = "plex_user.json"
+PLEX_USER_ID = os.environ.get("PLEX_USER_ID")
 
 # --------------------------------------------------------------------------- #
 # TRAKT / SIMKL OAUTH CONSTANTS
@@ -162,6 +164,48 @@ def save_provider(provider: str) -> None:
             json.dump({"provider": provider}, f, indent=2)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save provider: %s", exc)
+
+
+def load_selected_user() -> None:
+    """Load selected Plex user ID from file or environment."""
+    global PLEX_USER_ID
+    if PLEX_USER_ID:
+        return
+    if os.path.exists(PLEX_USER_FILE):
+        try:
+            with open(PLEX_USER_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            PLEX_USER_ID = str(data.get("user_id")) if data.get("user_id") else None
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load Plex user: %s", exc)
+
+
+def save_selected_user(user_id: str) -> None:
+    """Persist selected Plex user ID to file."""
+    global PLEX_USER_ID
+    PLEX_USER_ID = user_id
+    try:
+        with open(PLEX_USER_FILE, "w", encoding="utf-8") as f:
+            json.dump({"user_id": user_id}, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save Plex user: %s", exc)
+
+
+def get_plex_users() -> List[Dict[str, str]]:
+    """Return available Plex users with their role."""
+    if not plex:
+        return []
+    users = []
+    try:
+        account = plex.account()
+        users.append({"id": str(account.id), "title": account.username, "role": "owner"})
+        for u in account.users():
+            role = "managed" if getattr(u, "home", False) else "friend"
+            title = u.title or u.username
+            users.append({"id": str(u.id), "title": title, "role": role})
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to retrieve Plex users: %s", exc)
+    return users
 
 
 # --------------------------------------------------------------------------- #
@@ -1036,7 +1080,10 @@ def get_plex_history(plex) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    for entry in plex.history():
+    history_kwargs = {}
+    if PLEX_USER_ID:
+        history_kwargs["accountID"] = int(PLEX_USER_ID)
+    for entry in plex.history(**history_kwargs):
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         # Movies
@@ -1813,6 +1860,7 @@ def index():
     load_trakt_tokens()
     load_simkl_tokens()
     load_provider()
+    load_selected_user()
 
     # Change interval and start sync when requested
     if request.method == "POST":
@@ -1903,20 +1951,29 @@ def config_page():
     load_trakt_tokens()
     load_simkl_tokens()
     load_provider()
+    load_selected_user()
     if request.method == "POST":
-        provider = request.form.get("provider", "none")
-        save_provider(provider)
-        if provider == "none":
-            stop_scheduler()
-        # Removed automatic scheduler start - only manual start from sync tab
-        return redirect(url_for("config_page"))
+        if "provider" in request.form:
+            provider = request.form.get("provider", "none")
+            save_provider(provider)
+            if provider == "none":
+                stop_scheduler()
+            return redirect(url_for("config_page"))
+        if "plex_user_id" in request.form:
+            user_id = request.form.get("plex_user_id")
+            if user_id:
+                save_selected_user(user_id)
+            return redirect(url_for("config_page"))
     trakt_configured = bool(os.environ.get("TRAKT_ACCESS_TOKEN"))
     simkl_configured = bool(os.environ.get("SIMKL_ACCESS_TOKEN"))
+    users = get_plex_users()
     return render_template(
         "config.html",
         trakt_configured=trakt_configured,
         simkl_configured=simkl_configured,
         provider=SYNC_PROVIDER,
+        plex_users=users,
+        selected_user=PLEX_USER_ID,
     )
 
 
@@ -1959,6 +2016,13 @@ def authorize_service(service: str):
         service=service.capitalize(),
         code=prefill,
     )
+
+
+@app.route("/users")
+def list_users():
+    """Return available Plex users as JSON."""
+    load_selected_user()
+    return {"users": get_plex_users(), "selected": PLEX_USER_ID}
 
 
 @app.route("/clear/<service>", methods=["POST"])

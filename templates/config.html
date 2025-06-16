@@ -71,6 +71,20 @@
                     </div>
                 </form>
             </section>
+
+            <section class="card">
+                <h2>Select Plex User</h2>
+                <form method="post" class="provider-form">
+                    <select name="plex_user_id" class="form-input">
+                        {% for u in plex_users %}
+                        <option value="{{ u.id }}" {% if u.id == selected_user %}selected{% endif %}>{{ u.title }} ({{ u.role }})</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-actions">
+                        <button type="submit" class="button primary">Save</button>
+                    </div>
+                </form>
+            </section>
         </main>
 
         <footer class="app-footer">
