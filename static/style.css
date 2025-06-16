@@ -71,6 +71,28 @@ body {
     color: #ffffff;
 }
 
+/* Users table */
+.user-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.user-table th,
+.user-table td {
+    padding: 8px;
+    border: 1px solid #ddd;
+}
+
+.user-table th {
+    background-color: #f2f2f2;
+    text-align: left;
+}
+
+.disabled {
+    color: #888;
+}
+
 /* Main Content Area */
 .content-area {
     padding: 30px;

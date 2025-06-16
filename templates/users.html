@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlexyTrack - Users</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
+            <h1>PlexyTrack</h1>
+            <nav class="app-nav">
+                <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
+                <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
+                <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
+                <a href="{{ url_for('users_page') }}" class="nav-link active">Users</a>
+                <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
+            </nav>
+        </header>
+
+        <main class="content-area">
+            <section class="card">
+                <h2>Users</h2>
+                <table class="user-table">
+                    <thead>
+                        <tr><th>Username</th><th>Role</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{{ owner.username }}</td>
+                            <td>owner</td>
+                            <td>
+                                <a href="{{ url_for('users_page', user=owner.id) }}" class="button secondary">Select</a>
+                            </td>
+                        </tr>
+                        {% for u in users %}
+                        <tr>
+                            <td>{{ u.username }}</td>
+                            <td>{{ u.role }}</td>
+                            <td>
+                                {% if u.selectable %}
+                                <a href="{{ url_for('users_page', user=u.id) }}" class="button secondary">Select</a>
+                                {% else %}
+                                <span class="disabled">N/A</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% if watch_counts %}
+                <div class="status-message info" style="margin-top:15px;">
+                    {{ watch_counts.movies }} movies watched; {{ watch_counts.episodes }} episodes watched.
+                </div>
+                {% endif %}
+            </section>
+        </main>
+
+        <footer class="app-footer">
+            <p>MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
+        </footer>
+    </div>
+</body>
+</html>

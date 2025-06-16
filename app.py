@@ -195,6 +195,22 @@ def get_simkl_redirect_uri() -> str:
     return "http://localhost:5030/oauth/simkl"
 
 
+def get_plex_server():
+    """Return a connected :class:`PlexServer` instance or ``None``."""
+    global plex
+    if plex is None:
+        baseurl = os.environ.get("PLEX_BASEURL")
+        token = os.environ.get("PLEX_TOKEN")
+        if not baseurl or not token:
+            return None
+        try:
+            plex = PlexServer(baseurl, token)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to connect to Plex: %s", exc)
+            plex = None
+    return plex
+
+
 # --------------------------------------------------------------------------- #
 # UTILITIES
 # --------------------------------------------------------------------------- #
@@ -2062,6 +2078,58 @@ def restore_backup_route():
         logger.error("Failed to restore backup: %s", exc)
         return redirect(url_for("backup_page", message="Restore failed", mtype="error"))
     return redirect(url_for("backup_page", message="Backup restored", mtype="success"))
+
+
+@app.route("/users")
+def users_page():
+    """Display Plex users and optional play history counts."""
+    plex_server = get_plex_server()
+    if plex_server is None:
+        return redirect(url_for("config_page"))
+
+    account = plex_server.account()
+    owner = {
+        "id": account.id,
+        "username": account.username,
+        "role": "owner",
+    }
+
+    users = []
+    for user in account.users():
+        role = "managed user" if user.home else "friend"
+        users.append({
+            "id": user.id,
+            "username": user.username or user.title,
+            "role": role,
+            "selectable": not user.friend,
+        })
+
+    selected_id = request.args.get("user")
+    watch_counts = None
+    if selected_id:
+        try:
+            uid = int(selected_id)
+        except ValueError:
+            uid = None
+        if uid == account.id:
+            history = account.history()
+        else:
+            target = next((u for u in account.users() if u.id == uid), None)
+            history = target.history() if target and not target.friend else []
+        movies = [h for h in history if getattr(h, "type", "") == "movie"]
+        episodes = [h for h in history if getattr(h, "type", "") == "episode"]
+        watch_counts = {
+            "movies": len(movies),
+            "episodes": len(episodes),
+        }
+
+    return render_template(
+        "users.html",
+        owner=owner,
+        users=users,
+        watch_counts=watch_counts,
+        selected_id=int(selected_id) if selected_id else None,
+    )
 
 
 @app.route("/webhook", methods=["POST"])
