@@ -54,7 +54,11 @@
                     <div class="form-group">
                         <label for="server">Server:</label>
                         <select name="server" id="server" class="form-input">
-                            {% for s in servers %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                            {% for s in servers %}
+                            <option value="{{ s.name }}">
+                                {{ s.name }}{% if s.owned %} (owned){% elif s.source %} ({{ s.source }}){% endif %}
+                            </option>
+                            {% endfor %}
                         </select>
                     </div>
                     <button type="submit" class="button primary">Continue</button>
@@ -69,7 +73,9 @@
                     <div class="form-group">
                         <label for="user">User:</label>
                         <select name="user" id="user" class="form-input">
-                            {% for u in users %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+                            {% for u, role in users %}
+                            <option value="{{ u }}">{{ u }} ({{ role }})</option>
+                            {% endfor %}
                         </select>
                     </div>
                     <button type="submit" class="button primary">Finish</button>

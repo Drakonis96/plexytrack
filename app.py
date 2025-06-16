@@ -674,12 +674,17 @@ def save_plex_tokens(
         logger.error("Failed to save Plex tokens: %s", exc)
 
 
-def get_managed_users(account):
+def get_plex_users(account):
+    """Return list of all Plex users with their role."""
     try:
-        return sorted([u.title for u in account.users() if u.home])
+        users = [(account.username, "owner")]
+        for user in account.users():
+            role = "managed" if getattr(user, "home", False) else "friend"
+            users.append((user.title, role))
+        return users
     except Exception as exc:
-        logger.error("Failed to retrieve managed users: %s", exc)
-        return []
+        logger.error("Failed to retrieve users: %s", exc)
+        return [(account.username, "owner")]
 
 
 
@@ -1887,7 +1892,15 @@ def login_page():
                 account = MyPlexAccount(email, password, code=code)
                 session["account_token"] = account.authenticationToken
                 session["username"] = account.username
-                servers = [s.name for s in account.servers()]
+                servers = [
+                    {
+                        "name": r.name,
+                        "owned": getattr(r, "owned", False),
+                        "source": getattr(r, "sourceTitle", ""),
+                    }
+                    for r in account.resources()
+                    if r.provides == "server"
+                ]
                 session["servers"] = servers
                 session["stage"] = 2
                 return redirect(url_for("login_page"))
@@ -1919,12 +1932,11 @@ def login_page():
         if users is None:
             try:
                 account = MyPlexAccount(token=session.get("account_token"))
-                users = get_managed_users(account)
-                users.insert(0, session.get("username"))
+                users = get_plex_users(account)
                 session["users"] = users
             except Exception as exc:  # noqa: BLE001
                 error = f"Failed to retrieve users: {exc}"
-                users = [session.get("username")] if session.get("username") else []
+                users = [(session.get("username"), "owner")] if session.get("username") else []
 
         if request.method == "POST":
             selected_user = request.form.get("user")
