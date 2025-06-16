@@ -2239,10 +2239,7 @@ def test_connections() -> bool:
 
     try:
         plex = PlexServer(plex_baseurl, plex_token)
-        # Calling ``plex.account()`` fails with home user tokens. Fetching the
-        # library sections is sufficient to validate the connection for both
-        # admin and managed users.
-        plex.library.sections()
+        plex.account()
         logger.info("Successfully connected to Plex.")
     except Exception as exc:
         logger.error("Failed to connect to Plex: %s", exc)
