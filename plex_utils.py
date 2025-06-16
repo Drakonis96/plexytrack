@@ -14,7 +14,7 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 
-def get_plex_history(plex) -> Tuple[
+def get_plex_history(plex, user_id: Optional[str] = None) -> Tuple[
     Dict[str, Dict[str, Optional[str]]],
     Dict[str, Dict[str, Optional[str]]],
 ]:
@@ -24,7 +24,8 @@ def get_plex_history(plex) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    for entry in plex.history():
+    history_entries = plex.history(accountID=user_id) if user_id else plex.history()
+    for entry in history_entries:
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         if entry.type == "movie":
@@ -86,36 +87,37 @@ def get_plex_history(plex) -> Tuple[
                     "guid": guid,
                 }
 
-    logger.info("Fetching watched flags from Plex library…")
-    for section in plex.library.sections():
-        try:
-            if section.type == "movie":
-                for item in section.search(viewCount__gt=0):
-                    title = item.title
-                    year = normalize_year(getattr(item, "year", None))
-                    guid = imdb_guid(item)
-                    if guid and guid not in movies:
-                        movies[guid] = {
-                            "title": title,
-                            "year": year,
-                            "watched_at": to_iso_z(getattr(item, "lastViewedAt", None)),
-                            "guid": guid,
-                        }
-            elif section.type == "show":
-                for ep in section.searchEpisodes(viewCount__gt=0):
-                    code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
-                    guid = imdb_guid(ep)
-                    show_title = getattr(ep, "grandparentTitle", None)
-                    # Only store episodes with individual episode GUIDs (like previous version)
-                    if guid and guid not in episodes:
-                        episodes[guid] = {
-                            "show": show_title,
-                            "code": code,
-                            "watched_at": to_iso_z(getattr(ep, "lastViewedAt", None)),
-                            "guid": guid,
-                        }
-        except Exception as exc:
-            logger.debug("Failed fetching watched items from section %s: %s", section.title, exc)
+    if user_id is None:
+        logger.info("Fetching watched flags from Plex library…")
+        for section in plex.library.sections():
+            try:
+                if section.type == "movie":
+                    for item in section.search(viewCount__gt=0):
+                        title = item.title
+                        year = normalize_year(getattr(item, "year", None))
+                        guid = imdb_guid(item)
+                        if guid and guid not in movies:
+                            movies[guid] = {
+                                "title": title,
+                                "year": year,
+                                "watched_at": to_iso_z(getattr(item, "lastViewedAt", None)),
+                                "guid": guid,
+                            }
+                elif section.type == "show":
+                    for ep in section.searchEpisodes(viewCount__gt=0):
+                        code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
+                        guid = imdb_guid(ep)
+                        show_title = getattr(ep, "grandparentTitle", None)
+                        # Only store episodes with individual episode GUIDs (like previous version)
+                        if guid and guid not in episodes:
+                            episodes[guid] = {
+                                "show": show_title,
+                                "code": code,
+                                "watched_at": to_iso_z(getattr(ep, "lastViewedAt", None)),
+                                "guid": guid,
+                            }
+            except Exception as exc:
+                logger.debug("Failed fetching watched items from section %s: %s", section.title, exc)
 
     return movies, episodes
 
@@ -124,6 +126,8 @@ def update_plex(
     plex,
     movies: Set[Tuple[str, Optional[int], Optional[str]]],
     episodes: Set[Tuple[str, str, Optional[str]]],  # Only allow str for key, not Tuple fallback
+    *,
+    user_id: Optional[str] = None,
 ) -> None:
     """Mark items as watched in Plex when missing."""
     movie_count = 0
@@ -133,8 +137,9 @@ def update_plex(
         if guid and valid_guid(guid):
             try:
                 item = find_item_by_guid(plex, guid)
-                if item and getattr(item, "isWatched", lambda: bool(getattr(item, "viewCount", 0)))():
-                    continue
+                if item and user_id is None:
+                    if getattr(item, "isWatched", lambda: bool(getattr(item, "viewCount", 0)))():
+                        continue
                 if item:
                     item.markWatched()
                     movie_count += 1
@@ -163,9 +168,10 @@ def update_plex(
 
         try:
             # Check if already watched using isWatched property or viewCount
-            is_watched = getattr(found, "isWatched", False) or bool(getattr(found, "viewCount", 0))
-            if is_watched:
-                continue
+            if user_id is None:
+                is_watched = getattr(found, "isWatched", False) or bool(getattr(found, "viewCount", 0))
+                if is_watched:
+                    continue
             found.markWatched()
             movie_count += 1
         except Exception as exc:
@@ -181,10 +187,10 @@ def update_plex(
             try:
                 item = find_item_by_guid(plex, guid)
                 if item:
-                    # Check if already watched using isWatched property or viewCount
-                    is_watched = getattr(item, "isWatched", False) or bool(getattr(item, "viewCount", 0))
-                    if is_watched:
-                        continue
+                    if user_id is None:
+                        is_watched = getattr(item, "isWatched", False) or bool(getattr(item, "viewCount", 0))
+                        if is_watched:
+                            continue
                     item.markWatched()
                     episode_count += 1
                     continue
@@ -206,9 +212,10 @@ def update_plex(
             # Try to find the episode using the show's episode method
             ep_obj = show_obj.episode(season=season_num, episode=episode_num)
             # Check if already watched using isWatched property or viewCount
-            is_watched = getattr(ep_obj, "isWatched", False) or bool(getattr(ep_obj, "viewCount", 0))
-            if is_watched:
-                continue
+            if user_id is None:
+                is_watched = getattr(ep_obj, "isWatched", False) or bool(getattr(ep_obj, "viewCount", 0))
+                if is_watched:
+                    continue
             ep_obj.markWatched()
             episode_count += 1
         except Exception as exc:

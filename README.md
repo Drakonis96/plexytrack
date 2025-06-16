@@ -30,6 +30,8 @@ The application expects the following API credentials:
 
 - `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
 - `PLEX_TOKEN` – your Plex authentication token.
+- `PLEX_USER_ID` – optional Plex account ID used to filter history and mark
+  watches only for this user.
 - `TRAKT_CLIENT_ID` – client ID for your Trakt application (optional if only using Simkl).
 - `TRAKT_CLIENT_SECRET` – client secret from your Trakt application (optional if only using Simkl).
 - `SIMKL_CLIENT_ID` – client ID for your Simkl application (optional if only using Trakt).

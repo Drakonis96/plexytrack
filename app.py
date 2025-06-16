@@ -48,7 +48,7 @@ from utils import (
     trakt_episode_key,
     simkl_episode_key,
 )
-from plex_utils import get_plex_history, update_plex
+from plex_utils import get_plex_history as get_plex_history_util, update_plex
 from trakt_utils import (
     load_trakt_tokens,
     save_trakt_tokens,
@@ -127,6 +127,7 @@ SYNC_PROVIDER = "none"  # trakt | simkl | none
 PROVIDER_FILE = "provider.json"
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
+PLEX_USER_ID = os.environ.get("PLEX_USER_ID")
 
 # --------------------------------------------------------------------------- #
 # TRAKT / SIMKL OAUTH CONSTANTS
@@ -1025,7 +1026,7 @@ def update_simkl(
 # --------------------------------------------------------------------------- #
 # PLEX ↔ TRAKT
 # --------------------------------------------------------------------------- #
-def get_plex_history(plex) -> Tuple[
+def get_plex_history_old(plex) -> Tuple[
     Dict[str, Dict[str, Optional[str]]],
     Dict[str, Dict[str, Optional[str]]],
 ]:
@@ -1427,7 +1428,7 @@ def sync():
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
 
-    plex_movies, plex_episodes = get_plex_history(plex)
+    plex_movies, plex_episodes = get_plex_history_util(plex, user_id=PLEX_USER_ID)
     logger.info(
         "Found %d movies and %d episodes in Plex history.",
         len(plex_movies),
@@ -1506,7 +1507,7 @@ def sync():
                 if guid not in plex_episode_guids
             }
             try:
-                update_plex(plex, missing_movies, missing_episodes)
+                update_plex(plex, missing_movies, missing_episodes, user_id=PLEX_USER_ID)
             except Exception as exc:
                 logger.error("Failed updating Plex history: %s", exc)
 
@@ -1630,7 +1631,12 @@ def sync():
                 for e in episodes_to_add_plex
             }
             if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
-                update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
+                update_plex(
+                    plex,
+                    movies_to_add_plex_fmt,
+                    episodes_to_add_plex_fmt,
+                    user_id=PLEX_USER_ID,
+                )
 
             if current_activity:
                 save_last_sync_date(current_activity)
