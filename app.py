@@ -2269,28 +2269,9 @@ def test_connections() -> bool:
         plex.library.sections()
         logger.info("Successfully connected to Plex.")
     except Exception as exc:
-        logger.error("Failed to connect to Plex at %s: %s", plex_baseurl, exc)
-        # Try using MyPlex account resources as a fallback when the provided
-        # base URL is unreachable. This mirrors the logic from the login
-        # workflow where the best server connection is auto-selected.
-        try:
-            account = MyPlexAccount(token=plex_token)
-            resource = next((r for r in account.resources() if "server" in r.provides), None)
-            if resource:
-                plex = resource.connect()
-                plex.library.sections()
-                os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
-                logger.info(
-                    "Successfully connected to Plex via resource %s (%s)",
-                    resource.name,
-                    os.environ["PLEX_BASEURL"],
-                )
-            else:
-                raise RuntimeError("No Plex server resources available")
-        except Exception as exc2:
-            logger.error("Fallback connection using MyPlex failed: %s", exc2)
-            plex = None
-            return False
+        logger.error("Failed to connect to Plex: %s", exc)
+        plex = None
+        return False
 
     if trakt_enabled:
         headers = {
