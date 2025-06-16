@@ -42,6 +42,30 @@ def save_trakt_tokens(access_token: str, refresh_token: Optional[str]) -> None:
         logger.error("Failed to save Trakt tokens: %s", exc)
 
 
+def get_plex_account(plex):
+    """Return a :class:`~plexapi.myplex.MyPlexAccount` for ``plex``.
+
+    The default ``plex.myPlexAccount()`` helper fails when connected to a
+    shared server using a managed account. In that case we fall back to the
+    ``PLEX_ACCOUNT_TOKEN`` or ``PLEX_OWNER_TOKEN`` environment variables.
+    """
+    from plexapi.myplex import MyPlexAccount
+
+    try:
+        return plex.myPlexAccount()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("plex.myPlexAccount() failed: %s", exc)
+
+    token = os.environ.get("PLEX_ACCOUNT_TOKEN") or os.environ.get("PLEX_OWNER_TOKEN")
+    if not token:
+        raise
+
+    try:
+        return MyPlexAccount(token=token)
+    except Exception:
+        raise
+
+
 def load_trakt_last_sync_date() -> Optional[str]:
     """Return the stored last sync date for Trakt."""
     if os.path.exists(TRAKT_LAST_SYNC_FILE):
@@ -580,7 +604,7 @@ def sync_collections_to_trakt(plex, headers):
 
 
 def sync_watchlist(plex, headers, plex_history, trakt_history):
-    account = plex.myPlexAccount()
+    account = get_plex_account(plex)
     try:
         plex_watch = account.watchlist()
     except Exception as exc:
