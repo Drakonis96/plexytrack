@@ -73,7 +73,7 @@
                     <div class="form-group">
                         <label for="user">User:</label>
                         <select name="user" id="user" class="form-input">
-                            {% for u, role in users %}
+                            {% for u, role, _id in users %}
                             <option value="{{ u }}">{{ u }} ({{ role }})</option>
                             {% endfor %}
                         </select>

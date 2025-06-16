@@ -38,6 +38,7 @@ This application is currently in testing and is provided **as is**. I take no re
 - `TZ` – timezone for log timestamps, defaults to `Europe/Madrid`.
 - `PLEX_OWNER_TOKEN` – optional token of the Plex server owner when using a managed user.
 - `PLEX_ACCOUNT_TOKEN` – optional token for a shared server when you don't own it.
+- `PLEX_USER_ID` – optional Plex user id corresponding to the selected profile.
 
 
 At least one pair of Trakt or Simkl credentials is required. Plex tokens and the

@@ -638,6 +638,7 @@ def load_plex_tokens() -> None:
             os.environ["PLEX_USERNAME"] = data.get("username", "")
             os.environ["PLEX_SERVER"] = data.get("server", "")
             os.environ["PLEX_BASEURL"] = data.get("baseurl", "")
+            os.environ["PLEX_USER_ID"] = str(data.get("user_id", ""))
             logger.info("Loaded Plex tokens from %s", PLEX_TOKEN_FILE)
         except Exception as exc:
             logger.error("Failed to load Plex tokens: %s", exc)
@@ -650,6 +651,7 @@ def save_plex_tokens(
     username: str,
     server: str,
     baseurl: str,
+    user_id: Optional[int] = None,
 ) -> None:
     try:
         with open(PLEX_TOKEN_FILE, "w", encoding="utf-8") as f:
@@ -661,6 +663,7 @@ def save_plex_tokens(
                     "username": username,
                     "server": server,
                     "baseurl": baseurl,
+                    "user_id": user_id,
                 },
                 f,
                 indent=2,
@@ -671,6 +674,7 @@ def save_plex_tokens(
         os.environ["PLEX_USERNAME"] = username
         os.environ["PLEX_SERVER"] = server
         os.environ["PLEX_BASEURL"] = baseurl
+        os.environ["PLEX_USER_ID"] = str(user_id or "")
         logger.info("Saved Plex tokens to %s", PLEX_TOKEN_FILE)
     except Exception as exc:
         logger.error("Failed to save Plex tokens: %s", exc)
@@ -679,10 +683,10 @@ def save_plex_tokens(
 def get_plex_users(account):
     """Return list of all Plex users with their role."""
     try:
-        users = [(account.username, "owner")]
+        users = [(account.username, "owner", account.id)]
         for user in account.users():
             role = "managed" if getattr(user, "home", False) else "friend"
-            users.append((user.title, role))
+            users.append((user.title, role, user.id))
         return users
     except Exception as exc:
         logger.error("Failed to retrieve users: %s", exc)
@@ -1160,7 +1164,7 @@ def update_simkl(
 # --------------------------------------------------------------------------- #
 # PLEX ↔ TRAKT
 # --------------------------------------------------------------------------- #
-def get_plex_history(plex) -> Tuple[
+def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
     Dict[str, Dict[str, Optional[str]]],
     Dict[str, Dict[str, Optional[str]]],
 ]:
@@ -1171,7 +1175,8 @@ def get_plex_history(plex) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    for entry in plex.history():
+    history_kwargs = {"accountID": account_id} if account_id else {}
+    for entry in plex.history(**history_kwargs):
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         # Movies
@@ -1258,8 +1263,9 @@ def get_plex_history(plex) -> Tuple[
     logger.info("Fetching watched flags from Plex library…")
     for section in plex.library.sections():
         try:
+            search_kwargs = {"accountID": account_id} if account_id else {}
             if section.type == "movie":
-                for item in section.search(viewCount__gt=0):
+                for item in section.search(viewCount__gt=0, **search_kwargs):
                     title = item.title
                     year = normalize_year(getattr(item, "year", None))
                     guid = imdb_guid(item)
@@ -1271,7 +1277,7 @@ def get_plex_history(plex) -> Tuple[
                             "guid": guid,
                         }
             elif section.type == "show":
-                for ep in section.searchEpisodes(viewCount__gt=0):
+                for ep in section.searchEpisodes(viewCount__gt=0, **search_kwargs):
                     code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
                     guid = imdb_guid(ep)
                     show_title = getattr(ep, "grandparentTitle", None)
@@ -1562,7 +1568,9 @@ def sync():
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
 
-    plex_movies, plex_episodes = get_plex_history(plex)
+    account_id_env = os.environ.get("PLEX_USER_ID")
+    account_id = int(account_id_env) if account_id_env else None
+    plex_movies, plex_episodes = get_plex_history(plex, account_id)
     logger.info(
         "Found %d movies and %d episodes in Plex history.",
         len(plex_movies),
@@ -1641,7 +1649,7 @@ def sync():
                 if guid not in plex_episode_guids
             }
             try:
-                update_plex(plex, missing_movies, missing_episodes)
+                update_plex(plex, missing_movies, missing_episodes, account_id)
             except Exception as exc:
                 logger.error("Failed updating Plex history: %s", exc)
 
@@ -1765,7 +1773,7 @@ def sync():
                 for e in episodes_to_add_plex
             }
             if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
-                update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
+                update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt, account_id)
 
             if current_activity:
                 save_last_sync_date(current_activity)
@@ -2010,7 +2018,9 @@ def login_page():
                 session["users"] = users
             except Exception as exc:  # noqa: BLE001
                 error = f"Failed to retrieve users: {exc}"
-                users = [(session.get("username"), "owner")] if session.get("username") else []
+                users = [
+                    (session.get("username"), "owner", int(os.environ.get("PLEX_USER_ID", 0)))
+                ] if session.get("username") else []
 
         if request.method == "POST":
             selected_user = request.form.get("user")
@@ -2023,7 +2033,7 @@ def login_page():
                 if session.get("owned"):
                     if selected_user and selected_user != user:
                         owner_token = token
-                        role = dict(session.get("users", [])).get(selected_user)
+                        role = {u: r for u, r, _ in session.get("users", [])}.get(selected_user)
                         if role != "managed":
                             token = account.user(selected_user).get_token(session.get("machine_id"))
                         user = selected_user
@@ -2037,6 +2047,7 @@ def login_page():
                     user,
                     session.get("server_name"),
                     session.get("baseurl"),
+                    next((uid for u, _, uid in session.get("users", []) if u == user), None),
                 )
                 session["stage"] = 4
                 session["username"] = user
@@ -2249,6 +2260,7 @@ def clear_service(service: str):
             "PLEX_USERNAME",
             "PLEX_SERVER",
             "PLEX_BASEURL",
+            "PLEX_USER_ID",
         ]:
             os.environ.pop(var, None)
         if os.path.exists(PLEX_TOKEN_FILE):
