@@ -112,6 +112,8 @@ werkzeug_logger.setLevel(logging.WARNING)
 APP_NAME = "PlexyTrack"
 APP_VERSION = "v0.2.7"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
+PLEX_CLIENT_ID = "plexytrack"
+os.environ.setdefault("PLEXAPI_CLIENT_IDENTIFIER", PLEX_CLIENT_ID)
 
 # --------------------------------------------------------------------------- #
 # FLASK + APSCHEDULER
@@ -685,6 +687,43 @@ def get_plex_users(account):
     except Exception as exc:
         logger.error("Failed to retrieve users: %s", exc)
         return [(account.username, "owner")]
+
+
+def get_account_servers(token: str) -> List[dict]:
+    """Return list of Plex servers using the v2 resources API."""
+    url = "https://plex.tv/api/v2/resources"
+    headers = {
+        "Accept": "application/json",
+        "X-Plex-Token": token,
+        "X-Plex-Client-Identifier": os.environ.get("PLEXAPI_CLIENT_IDENTIFIER", PLEX_CLIENT_ID),
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        servers = []
+        for res in resp.json():
+            if "server" not in res.get("provides", ""):
+                continue
+            baseurl = None
+            for conn in res.get("connections", []):
+                if conn.get("protocol") == "https":
+                    baseurl = conn.get("uri")
+                    break
+            if not baseurl and res.get("connections"):
+                baseurl = res["connections"][0].get("uri")
+            servers.append(
+                {
+                    "name": res.get("name"),
+                    "owned": res.get("owned", False),
+                    "source": res.get("sourceTitle", ""),
+                    "machine_id": res.get("clientIdentifier"),
+                    "baseurl": baseurl,
+                }
+            )
+        return servers
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to retrieve servers: %s", exc)
+        return []
 
 
 
@@ -1892,15 +1931,7 @@ def login_page():
                 account = MyPlexAccount(email, password, code=code)
                 session["account_token"] = account.authenticationToken
                 session["username"] = account.username
-                servers = [
-                    {
-                        "name": r.name,
-                        "owned": getattr(r, "owned", False),
-                        "source": getattr(r, "sourceTitle", ""),
-                    }
-                    for r in account.resources()
-                    if r.provides == "server"
-                ]
+                servers = get_account_servers(account.authenticationToken)
                 session["servers"] = servers
                 session["stage"] = 2
                 return redirect(url_for("login_page"))
@@ -1913,14 +1944,14 @@ def login_page():
         if request.method == "POST":
             server_name = request.form.get("server")
             try:
-                account = MyPlexAccount(token=session.get("account_token"))
-                resource = next(r for r in account.resources() if r.name == server_name and r.provides == "server")
-                server = resource.connect()
-                session["server_name"] = server.name
-                session["server_token"] = server.accessToken
-                session["machine_id"] = server.machineIdentifier
-                session["baseurl"] = server._baseurl
-                session["owned"] = getattr(server, "owned", False)
+                servers = session.get("servers", [])
+                info = next(s for s in servers if s["name"] == server_name)
+                server = PlexServer(info["baseurl"], session.get("account_token"))
+                session["server_name"] = info["name"]
+                session["server_token"] = session.get("account_token")
+                session["machine_id"] = info.get("machine_id")
+                session["baseurl"] = info["baseurl"]
+                session["owned"] = info.get("owned", False)
                 session["stage"] = 3
                 return redirect(url_for("login_page"))
             except Exception as exc:  # noqa: BLE001
