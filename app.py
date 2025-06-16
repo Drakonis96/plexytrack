@@ -1928,10 +1928,38 @@ def plex_login():
     username = ""
     load_plex_token()
     if request.method == "GET" and os.environ.get("PLEX_TOKEN"):
+        try:
+            if plex_account is None:
+                plex_account = MyPlexAccount(token=os.environ["PLEX_TOKEN"])
+
+            users = [{"id": "account", "title": plex_account.username or "Admin"}]
+            for u in plex_account.users():
+                if getattr(u, "home", False):
+                    users.append({"id": str(u.id), "title": u.title})
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to list Plex users: %s", exc)
+            users = []
+
+        servers: List[dict] = []
+        try:
+            for res in plex_account.resources():
+                if "server" in res.provides:
+                    servers.append(
+                        {
+                            "id": res.clientIdentifier,
+                            "name": res.name,
+                            "uri": res.connections[0].uri,
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to list Plex servers: %s", exc)
+
         return render_template(
             "login.html",
             logged_in=True,
             current_user=os.environ.get("PLEX_USER", ""),
+            users=users,
+            servers=servers,
         )
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -1949,6 +1977,9 @@ def plex_login():
             logger.error("Plex login failed: %s", exc)
             error = "Plex login failed"
             return render_template("login.html", error=error, username=username)
+
+        if not os.environ.get("PLEX_TOKEN"):
+            os.environ["PLEX_TOKEN"] = plex_account.authenticationToken
 
         users = [{"id": "account", "title": plex_account.username or "Admin"}]
         try:
@@ -2024,8 +2055,9 @@ def plex_select_user():
             if server_resource:
                 break
 
+        admin_token = os.environ.get("PLEX_TOKEN") or plex_account.authenticationToken
         if server_resource:
-            token = server_resource.accessToken or plex_account.authenticationToken
+            token = admin_token
             plex = PlexServer(baseurl or server_resource.connections[0].uri, token)
             os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
         else:
@@ -2037,17 +2069,18 @@ def plex_select_user():
                 (r for r in plex_account.resources() if "server" in r.provides), None
             )
             if alt_resource:
-                token = alt_resource.accessToken or plex_account.authenticationToken
+                token = admin_token
                 plex = PlexServer(baseurl or alt_resource.connections[0].uri, token)
                 os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
             else:
-                token = plex_account.authenticationToken
+                token = admin_token
                 plex = PlexServer(baseurl, token)
 
-        os.environ["PLEX_TOKEN"] = token
+        if not os.environ.get("PLEX_TOKEN"):
+            os.environ["PLEX_TOKEN"] = admin_token
+
         os.environ["PLEX_USER"] = user_name
         os.environ["PLEX_ACCOUNT_ID"] = str(account_id)
-        save_plex_token(token, user_name, account_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed selecting Plex user: %s", exc)
         users = [{"id": "account", "title": plex_account.username or "Admin"}]
@@ -2073,15 +2106,8 @@ def plex_logout():
     global plex, plex_account
     plex = None
     plex_account = None
-    os.environ.pop("PLEX_TOKEN", None)
     os.environ.pop("PLEX_USER", None)
     os.environ.pop("PLEX_ACCOUNT_ID", None)
-    if os.path.exists(PLEX_TOKEN_FILE):
-        try:
-            os.remove(PLEX_TOKEN_FILE)
-            logger.info("Removed Plex token file")
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to remove Plex token file: %s", exc)
     return redirect(url_for("plex_login"))
 
 
