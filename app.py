@@ -1959,6 +1959,7 @@ def index():
 
     load_trakt_tokens()
     load_simkl_tokens()
+    load_plex_tokens()
     load_provider()
 
     # Change interval and start sync when requested
@@ -2236,7 +2237,7 @@ def test_connections() -> bool:
     simkl_enabled = SYNC_PROVIDER == "simkl" and bool(simkl_token and simkl_client_id)
 
     if not all([plex_baseurl, plex_token]):
-        logger.error("Missing environment variables for Plex.")
+        logger.warning("Plex credentials not configured; visit the login page.")
         return False
     if not trakt_enabled and not simkl_enabled:
         logger.error("Missing environment variables for selected provider.")

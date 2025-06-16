@@ -26,11 +26,6 @@ This application is currently in testing and is provided **as is**. I take no re
 
 ## Requirements
 
-The application expects the following API credentials:
-
-- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
-- `PLEX_TOKEN` – your Plex authentication token.
-- `PLEX_ACCOUNT_TOKEN` – account token when using a shared server.
 - `TRAKT_CLIENT_ID` – client ID for your Trakt application (optional if only using Simkl).
 - `TRAKT_CLIENT_SECRET` – client secret from your Trakt application (optional if only using Simkl).
 - `SIMKL_CLIENT_ID` – client ID for your Simkl application (optional if only using Trakt).
@@ -42,8 +37,10 @@ The application expects the following API credentials:
   unset, the address of the current UI is used automatically.
 - `TZ` – timezone for log timestamps, defaults to `Europe/Madrid`.
 
-You must set the Plex variables above and at least one pair of Trakt or Simkl
-credentials. Leave the variables for the service you are not using unset.
+
+At least one pair of Trakt or Simkl credentials is required. Plex tokens and the
+server address will be stored automatically when you sign in from the **Log in**
+tab, so you don't need to set any Plex variables.
 
 You do **not** need to provide a Trakt access token or refresh token. The web
 interface will guide you through authorizing the app and will store the tokens
@@ -79,14 +76,18 @@ the application will trigger an immediate sync whenever an event is received.
 
 ## Getting a Plex token
 
+You generally don't need to obtain the token manually – simply open the **Log in**
+tab in the web interface and sign in with your Plex account. The application will
+store the token, server address and selected user automatically. If you ever need
+to find the token yourself:
+
 1. Open the Plex Web application and sign in.
 2. Pick any movie or show and click the three dots in the lower right corner to
    open **Get Info**.
 3. In the information panel choose **View XML**. A new tab will display the XML
    data for that item.
 4. Copy the value of `X-Plex-Token` from the URL bar – that's your token.
-5. If you need more details, Plex offers instructions at <https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/>.
-6. You can now use the **Log in** tab in the web interface to sign in with your Plex account and store the appropriate tokens.
+5. More details can be found at <https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/>.
 
 ## Getting Trakt API credentials
 
@@ -109,9 +110,6 @@ the application will trigger an immediate sync whenever an event is received.
 2. Create a `.env` file in the project root and define the variables listed above. Example:
 
 ```
-PLEX_BASEURL=http://localhost:32400
-PLEX_TOKEN=YOUR_PLEX_TOKEN
-PLEX_ACCOUNT_TOKEN=
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID
