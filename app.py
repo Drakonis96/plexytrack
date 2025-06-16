@@ -2087,7 +2087,11 @@ def users_page():
     if plex_server is None:
         return redirect(url_for("config_page"))
 
-    account = plex_server.account()
+    try:
+        account = plex_server.myPlexAccount()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to retrieve Plex account: %s", exc)
+        return redirect(url_for("config_page"))
     owner = {
         "id": account.id,
         "username": account.username,
