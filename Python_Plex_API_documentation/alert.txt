@@ -1,0 +1,55 @@
+Alert plexapi.alert
+classplexapi.alert.AlertListener(server, callback: ~typing.Callable = None, callbackError: ~typing.Callable = None, ws_socket: <module 'socket' from '/home/docs/.asdf/installs/python/3.9.20/lib/python3.9/socket.py'> = None)[source]
+Bases: Thread
+
+Creates a websocket connection to the PlexServer to optionally receive alert notifications. These often include messages from Plex about media scans as well as updates to currently running Transcode Sessions. This class implements threading.Thread, therefore to start monitoring alerts you must call .start() on the object once it’s created. When calling PlexServer.startAlertListener(), the thread will be started for you.
+
+Known state-values for timeline entries, with identifier=`com.plexapp.plugins.library`:
+
+0
+:
+The item was created
+
+1
+:
+Reporting progress on item processing
+
+2
+:
+Matching the item
+
+3
+:
+Downloading the metadata
+
+4
+:
+Processing downloaded metadata
+
+5
+:
+The item processed
+
+9
+:
+The item deleted
+
+When metadata agent is not set for the library processing ends with state=1.
+
+Parameters
+:
+server (PlexServer) – PlexServer this listener is connected to.
+
+callback (func) – Callback function to call on received messages. The callback function will be sent a single argument ‘data’ which will contain a dictionary of data received from the server. def my_callback(data): ...
+
+callbackError (func) – Callback function to call on errors. The callback function will be sent a single argument ‘error’ which will contain the Error object. def my_callback(error): ...
+
+ws_socket (socket) – Socket to use for the connection. If not specified, a new socket will be created.
+
+run()[source]
+Method representing the thread’s activity.
+
+You may override this method in a subclass. The standard run() method invokes the callable object passed to the object’s constructor as the target argument, if any, with sequential and keyword arguments taken from the args and kwargs arguments, respectively.
+
+stop()[source]
+Stop the AlertListener thread. Once the notifier is stopped, it cannot be directly started again. You must call startAlertListener() from a PlexServer instance.

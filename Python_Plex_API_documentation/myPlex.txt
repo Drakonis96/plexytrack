@@ -1,0 +1,998 @@
+MyPlex plexapi.myplex
+classplexapi.myplex.MyPlexAccount(username=None, password=None, token=None, session=None, timeout=None, code=None, remember=True)[source]
+Bases: PlexObject
+
+MyPlex account and profile information. This object represents the data found Account on the myplex.tv servers at the url https://plex.tv/api/v2/user. You may create this object directly by passing in your username & password (or token). There is also a convenience method provided at myPlexAccount() which will create and return this object.
+
+Parameters
+:
+username (str) – Plex login username if not using a token.
+
+password (str) – Plex login password if not using a token.
+
+token (str) – Plex authentication token instead of username and password.
+
+session (requests.Session, optional) – Use your own session object if you want to cache the http responses from PMS.
+
+timeout (int) – timeout in seconds on initial connect to myplex (default config.TIMEOUT).
+
+code (str) – Two-factor authentication code to use when logging in with username and password.
+
+remember (bool) – Remember the account token for 14 days (Default True).
+
+Variables
+:
+key (str) – ‘https://plex.tv/api/v2/user’
+
+adsConsent (str) – Unknown.
+
+adsConsentReminderAt (str) – Unknown.
+
+adsConsentSetAt (str) – Unknown.
+
+anonymous (str) – Unknown.
+
+authToken (str) – The account token.
+
+backupCodesCreated (bool) – If the two-factor authentication backup codes have been created.
+
+confirmed (bool) – If the account has been confirmed.
+
+country (str) – The account country.
+
+email (str) – The account email address.
+
+emailOnlyAuth (bool) – If login with email only is enabled.
+
+experimentalFeatures (bool) – If experimental features are enabled.
+
+friendlyName (str) – Your account full name.
+
+entitlements (List<str>) – List of devices your allowed to use with this account.
+
+guest (bool) – If the account is a Plex Home guest user.
+
+hasPassword (bool) – If the account has a password.
+
+home (bool) – If the account is a Plex Home user.
+
+homeAdmin (bool) – If the account is the Plex Home admin.
+
+homeSize (int) – The number of accounts in the Plex Home.
+
+id (int) – The Plex account ID.
+
+joinedAt (datetime) – Date the account joined Plex.
+
+locale (str) – the account locale
+
+mailingListActive (bool) – If you are subscribed to the Plex newsletter.
+
+mailingListStatus (str) – Your current mailing list status.
+
+maxHomeSize (int) – The maximum number of accounts allowed in the Plex Home.
+
+pin (str) – The hashed Plex Home PIN.
+
+profileAutoSelectAudio (bool) – If the account has automatically select audio and subtitle tracks enabled.
+
+profileDefaultAudioLanguage (str) – The preferred audio language for the account.
+
+profileDefaultSubtitleLanguage (str) – The preferred subtitle language for the account.
+
+profileAutoSelectSubtitle (int) – The auto-select subtitle mode (0 = Manually selected, 1 = Shown with foreign audio, 2 = Always enabled).
+
+profileDefaultSubtitleAccessibility (int) – The subtitles for the deaf or hard-of-hearing (SDH) searches mode (0 = Prefer non-SDH subtitles, 1 = Prefer SDH subtitles, 2 = Only show SDH subtitles, 3 = Only shown non-SDH subtitles).
+
+profileDefaultSubtitleForced (int) – The forced subtitles searches mode (0 = Prefer non-forced subtitles, 1 = Prefer forced subtitles, 2 = Only show forced subtitles, 3 = Only show non-forced subtitles).
+
+protected (bool) – If the account has a Plex Home PIN enabled.
+
+rememberExpiresAt (datetime) – Date the token expires.
+
+restricted (bool) – If the account is a Plex Home managed user.
+
+roles – (List<str>) Lit of account roles. Plexpass membership listed here.
+
+scrobbleTypes (List<int>) – Unknown.
+
+subscriptionActive (bool) – If the account’s Plex Pass subscription is active.
+
+subscriptionDescription (str) – Description of the Plex Pass subscription.
+
+subscriptionFeatures – (List<str>) List of features allowed on your Plex Pass subscription.
+
+subscriptionPaymentService (str) – Payment service used for your Plex Pass subscription.
+
+subscriptionPlan (str) – Name of Plex Pass subscription plan.
+
+subscriptionStatus (str) – String representation of subscriptionActive.
+
+subscriptionSubscribedAt (datetime) – Date the account subscribed to Plex Pass.
+
+thumb (str) – URL of the account thumbnail.
+
+title (str) – The title of the account (username or friendly name).
+
+twoFactorEnabled (bool) – If two-factor authentication is enabled.
+
+username (str) – The account username.
+
+uuid (str) – The account UUID.
+
+signout()[source]
+Sign out of the Plex account. Invalidates the authentication token.
+
+propertyauthenticationToken
+Returns the authentication token for the account. Alias for authToken.
+
+ping()[source]
+Ping the Plex.tv API. This will refresh the authentication token to prevent it from expiring.
+
+device(name=None, clientId=None)[source]
+Returns the MyPlexDevice that matches the name specified.
+
+Parameters
+:
+name (str) – Name to match against.
+
+clientId (str) – clientIdentifier to match against.
+
+devices()[source]
+Returns a list of all MyPlexDevice objects connected to the server.
+
+resource(name)[source]
+Returns the MyPlexResource that matches the name specified.
+
+Parameters
+:
+name (str) – Name or machine identifier to match against.
+
+resources()[source]
+Returns a list of all MyPlexResource objects connected to the server.
+
+inviteFriend(user, server, sections=None, allowSync=False, allowCameraUpload=False, allowChannels=False, filterMovies=None, filterTelevision=None, filterMusic=None)[source]
+Share library content with the specified user.
+
+Parameters
+:
+user (MyPlexUser) – MyPlexUser object, username, or email of the user to be added.
+
+server (PlexServer) – PlexServer object, or machineIdentifier containing the library sections to share.
+
+sections (List<LibrarySection>) – List of LibrarySection objects, or names to be shared (default None). sections must be defined in order to update shared libraries.
+
+allowSync (Bool) – Set True to allow user to sync content.
+
+allowCameraUpload (Bool) – Set True to allow user to upload photos.
+
+allowChannels (Bool) – Set True to allow user to utilize installed channels.
+
+filterMovies (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterTelevision (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterMusic (Dict) – Dict containing key ‘label’ set to a list of values to be filtered. ex: {‘label’:[‘foo’]}
+
+createHomeUser(user, server, sections=None, allowSync=False, allowCameraUpload=False, allowChannels=False, filterMovies=None, filterTelevision=None, filterMusic=None)[source]
+Share library content with the specified user.
+
+Parameters
+:
+user (MyPlexUser) – MyPlexUser object, username, or email of the user to be added.
+
+server (PlexServer) – PlexServer object, or machineIdentifier containing the library sections to share.
+
+sections (List<LibrarySection>) – List of LibrarySection objects, or names to be shared (default None). sections must be defined in order to update shared libraries.
+
+allowSync (Bool) – Set True to allow user to sync content.
+
+allowCameraUpload (Bool) – Set True to allow user to upload photos.
+
+allowChannels (Bool) – Set True to allow user to utilize installed channels.
+
+filterMovies (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterTelevision (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterMusic (Dict) – Dict containing key ‘label’ set to a list of values to be filtered. ex: {‘label’:[‘foo’]}
+
+createExistingUser(user, server, sections=None, allowSync=False, allowCameraUpload=False, allowChannels=False, filterMovies=None, filterTelevision=None, filterMusic=None)[source]
+Share library content with the specified user.
+
+Parameters
+:
+user (MyPlexUser) – MyPlexUser object, username, or email of the user to be added.
+
+server (PlexServer) – PlexServer object, or machineIdentifier containing the library sections to share.
+
+sections (List<LibrarySection>) – List of LibrarySection objects, or names to be shared (default None). sections must be defined in order to update shared libraries.
+
+allowSync (Bool) – Set True to allow user to sync content.
+
+allowCameraUpload (Bool) – Set True to allow user to upload photos.
+
+allowChannels (Bool) – Set True to allow user to utilize installed channels.
+
+filterMovies (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterTelevision (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterMusic (Dict) – Dict containing key ‘label’ set to a list of values to be filtered. ex: {‘label’:[‘foo’]}
+
+removeFriend(user)[source]
+Remove the specified user from your friends.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser, username, or email of the user to be removed.
+
+removeHomeUser(user)[source]
+Remove the specified user from your home users.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser, username, or email of the user to be removed.
+
+switchHomeUser(user, pin=None)[source]
+Returns a new MyPlexAccount object switched to the given home user.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser, username, or email of the home user to switch to.
+
+pin (str) – PIN for the home user (required if the home user has a PIN set).
+
+Example
+
+from plexapi.myplex import MyPlexAccount
+# Login to a Plex Home account
+account = MyPlexAccount('<USERNAME>', '<PASSWORD>')
+# Switch to a different Plex Home user
+userAccount = account.switchHomeUser('Username')
+setPin(newPin, currentPin=None)[source]
+Set a new Plex Home PIN for the account.
+
+Parameters
+:
+newPin (str) – New PIN to set for the account.
+
+currentPin (str) – Current PIN for the account (required to change the PIN).
+
+removePin(currentPin)[source]
+Remove the Plex Home PIN for the account.
+
+Parameters
+:
+currentPin (str) – Current PIN for the account (required to remove the PIN).
+
+setManagedUserPin(user, newPin)[source]
+Set a new Plex Home PIN for a managed home user. This must be done from the Plex Home admin account.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser or username of the managed home user.
+
+newPin (str) – New PIN to set for the managed home user.
+
+removeManagedUserPin(user)[source]
+Remove the Plex Home PIN for a managed home user. This must be done from the Plex Home admin account.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser or username of the managed home user.
+
+acceptInvite(user)[source]
+Accept a pending friend invite from the specified user.
+
+Parameters
+:
+user (MyPlexInvite or str) – MyPlexInvite, username, or email of the friend invite to accept.
+
+cancelInvite(user)[source]
+Cancel a pending firend invite for the specified user.
+
+Parameters
+:
+user (MyPlexInvite or str) – MyPlexInvite, username, or email of the friend invite to cancel.
+
+updateFriend(user, server, sections=None, removeSections=False, allowSync=None, allowCameraUpload=None, allowChannels=None, filterMovies=None, filterTelevision=None, filterMusic=None)[source]
+Update the specified user’s share settings.
+
+Parameters
+:
+user (MyPlexUser) – MyPlexUser object, username, or email of the user to be updated.
+
+server (PlexServer) – PlexServer object, or machineIdentifier containing the library sections to share.
+
+sections (List<LibrarySection>) – List of LibrarySection objects, or names to be shared (default None). sections must be defined in order to update shared libraries.
+
+removeSections (Bool) – Set True to remove all shares. Supersedes sections.
+
+allowSync (Bool) – Set True to allow user to sync content.
+
+allowCameraUpload (Bool) – Set True to allow user to upload photos.
+
+allowChannels (Bool) – Set True to allow user to utilize installed channels.
+
+filterMovies (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterTelevision (Dict) – Dict containing key ‘contentRating’ and/or ‘label’ each set to a list of values to be filtered. ex: {‘contentRating’:[‘G’], ‘label’:[‘foo’]}
+
+filterMusic (Dict) – Dict containing key ‘label’ set to a list of values to be filtered. ex: {‘label’:[‘foo’]}
+
+user(username)[source]
+Returns the MyPlexUser that matches the specified username or email.
+
+Parameters
+:
+username (str) – Username, email or id of the user to return.
+
+users()[source]
+Returns a list of all MyPlexUser objects connected to your account.
+
+pendingInvite(username, includeSent=True, includeReceived=True)[source]
+Returns the MyPlexInvite that matches the specified username or email. Note: This can be a pending invite sent from your account or received to your account.
+
+Parameters
+:
+username (str) – Username, email or id of the user to return.
+
+includeSent (bool) – True to include sent invites.
+
+includeReceived (bool) – True to include received invites.
+
+pendingInvites(includeSent=True, includeReceived=True)[source]
+Returns a list of all MyPlexInvite objects connected to your account. Note: This includes all pending invites sent from your account and received to your account.
+
+Parameters
+:
+includeSent (bool) – True to include sent invites.
+
+includeReceived (bool) – True to include received invites.
+
+optOut(playback=None, library=None)[source]
+Opt in or out of sharing stuff with plex. See: https://www.plex.tv/about/privacy-legal/
+
+syncItems(client=None, clientId=None)[source]
+Returns an instance of SyncList for specified client.
+
+Parameters
+:
+client (MyPlexDevice) – a client to query SyncItems for.
+
+clientId (str) – an identifier of a client to query SyncItems for.
+
+If both client and clientId provided the client would be preferred. If neither client nor clientId provided the clientId would be set to current clients’s identifier.
+
+sync(sync_item, client=None, clientId=None)[source]
+Adds specified sync item for the client. It’s always easier to use methods defined directly in the media objects, e.g. sync(), sync().
+
+Parameters
+:
+client (MyPlexDevice) – a client for which you need to add SyncItem to.
+
+clientId (str) – an identifier of a client for which you need to add SyncItem to.
+
+sync_item (SyncItem) – prepared SyncItem object with all fields set.
+
+If both client and clientId provided the client would be preferred. If neither client nor clientId provided the clientId would be set to current clients’s identifier.
+
+Returns
+:
+an instance of created syncItem.
+
+Return type
+:
+SyncItem
+
+Raises
+:
+BadRequest – When client with provided clientId wasn’t found.
+
+BadRequest – Provided client doesn’t provides sync-target.
+
+claimToken()[source]
+Returns a str, a new “claim-token”, which you can use to register your new Plex Server instance to your account. See: https://hub.docker.com/r/plexinc/pms-docker/, https://www.plex.tv/claim/
+
+history(maxresults=None, mindate=None)[source]
+Get Play History for all library sections on all servers for the owner.
+
+Parameters
+:
+maxresults (int) – Only return the specified number of results (optional).
+
+mindate (datetime) – Min datetime to return results from.
+
+onlineMediaSources()[source]
+Returns a list of user account Online Media Sources settings AccountOptOut
+
+videoOnDemand()[source]
+Returns a list of VOD Hub items Hub
+
+tidal()[source]
+Returns a list of tidal Hub items Hub
+
+watchlist(filter=None, sort=None, libtype=None, maxresults=None, **kwargs)[source]
+Returns a list of Movie and Show items in the user’s watchlist. Note: The objects returned are from Plex’s online metadata. To get the matching item on a Plex server, search for the media using the guid.
+
+Parameters
+:
+filter (str, optional) – ‘available’ or ‘released’ to only return items that are available or released, otherwise return all items.
+
+sort (str, optional) – In the format field:dir. Available fields are watchlistedAt (Added At), titleSort (Title), originallyAvailableAt (Release Date), or rating (Critic Rating). dir can be asc or desc.
+
+libtype (str, optional) – ‘movie’ or ‘show’ to only return movies or shows, otherwise return all items.
+
+maxresults (int, optional) – Only return the specified number of results.
+
+**kwargs (dict) – Additional custom filters to apply to the search results.
+
+Example
+
+# Watchlist for released movies sorted by critic rating in descending order
+watchlist = account.watchlist(filter='released', sort='rating:desc', libtype='movie')
+item = watchlist[0]  # First item in the watchlist
+
+# Search for the item on a Plex server
+result = plex.library.search(guid=item.guid, libtype=item.type)
+onWatchlist(item)[source]
+Returns True if the item is on the user’s watchlist.
+
+Parameters
+:
+item (Movie or Show) – Item to check if it is on the user’s watchlist.
+
+addToWatchlist(items)[source]
+Add media items to the user’s watchlist
+
+Parameters
+:
+items (List) – List of Movie or Show objects to be added to the watchlist.
+
+Raises
+:
+BadRequest – When trying to add invalid or existing media to the watchlist.
+
+removeFromWatchlist(items)[source]
+Remove media items from the user’s watchlist
+
+Parameters
+:
+items (List) – List of Movie or Show objects to be added to the watchlist.
+
+Raises
+:
+BadRequest – When trying to remove invalid or non-existing media to the watchlist.
+
+userState(item)[source]
+Returns a UserState object for the specified item.
+
+Parameters
+:
+item (Movie or Show) – Item to return the user state.
+
+isPlayed(item)[source]
+Return True if the item is played on Discover.
+
+:param item (Movie: :param : :param Show: :param Season or: :param Episode): Object from searchDiscover(). :param Can be also result from Plex Movie or Plex TV Series agent.:
+
+markPlayed(item)[source]
+Mark the Plex object as played on Discover.
+
+:param item (Movie: :param : :param Show: :param Season or: :param Episode): Object from searchDiscover(). :param Can be also result from Plex Movie or Plex TV Series agent.:
+
+markUnplayed(item)[source]
+Mark the Plex object as unplayed on Discover.
+
+:param item (Movie: :param : :param Show: :param Season or: :param Episode): Object from searchDiscover(). :param Can be also result from Plex Movie or Plex TV Series agent.:
+
+searchDiscover(query, limit=30, libtype=None, providers='discover')[source]
+Search for movies and TV shows in Discover. Returns a list of Movie and Show objects.
+
+Parameters
+:
+query (str) – Search query.
+
+limit (int, optional) – Limit to the specified number of results. Default 30.
+
+libtype (str, optional) – ‘movie’ or ‘show’ to only return movies or shows, otherwise return all items.
+
+providers (str, optional) – ‘discover’ for default behavior or ‘discover,PLEXAVOD’ to also include the Plex ad-suported video service or ‘discover,PLEXAVOD,PLEXTVOD’ to also include the Plex video rental service
+
+propertyviewStateSync
+Returns True or False if syncing of watch state and ratings is enabled or disabled, respectively, for the account.
+
+enableViewStateSync()[source]
+Enable syncing of watch state and ratings for the account.
+
+disableViewStateSync()[source]
+Disable syncing of watch state and ratings for the account.
+
+link(pin)[source]
+Link a device to the account using a pin code.
+
+Parameters
+:
+pin (str) – The 4 digit link pin code.
+
+publicIP()[source]
+Returns your public IP address.
+
+geoip(ip_address)[source]
+Returns a GeoLocation object with geolocation information for an IP address using Plex’s GeoIP database.
+
+Parameters
+:
+ip_address (str) – IP address to lookup.
+
+classplexapi.myplex.MyPlexUser(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+This object represents non-signed in users such as friends and linked accounts. NOTE: This should not be confused with the MyPlexAccount which is your specific account. The raw xml for the data presented here can be found at: https://plex.tv/api/users/
+
+Variables
+:
+TAG (str) – ‘User’
+
+key (str) – ‘https://plex.tv/api/users/’
+
+allowCameraUpload (bool) – True if this user can upload images.
+
+allowChannels (bool) – True if this user has access to channels.
+
+allowSync (bool) – True if this user can sync.
+
+email (str) – User’s email address (user@gmail.com).
+
+filterAll (str) – Unknown.
+
+filterMovies (str) – Unknown.
+
+filterMusic (str) – Unknown.
+
+filterPhotos (str) – Unknown.
+
+filterTelevision (str) – Unknown.
+
+home (bool) – Unknown.
+
+id (int) – User’s Plex account ID.
+
+protected (False) – Unknown (possibly SSL enabled?).
+
+recommendationsPlaylistId (str) – Unknown.
+
+restricted (str) – Unknown.
+
+servers (List<<MyPlexServerShare>)) – Servers shared with the user.
+
+thumb (str) – Link to the users avatar.
+
+title (str) – Seems to be an alias for username.
+
+username (str) – User’s username.
+
+server(name)[source]
+Returns the MyPlexServerShare that matches the name specified.
+
+Parameters
+:
+name (str) – Name of the server to return.
+
+history(maxresults=None, mindate=None)[source]
+Get all Play History for a user in all shared servers. :param maxresults: Only return the specified number of results (optional). :type maxresults: int :param mindate: Min datetime to return results from. :type mindate: datetime
+
+classplexapi.myplex.MyPlexInvite(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+This object represents pending friend invites.
+
+Variables
+:
+TAG (str) – ‘Invite’
+
+createdAt (datetime) – Datetime the user was invited.
+
+email (str) – User’s email address (user@gmail.com).
+
+friend (bool) – True or False if the user is invited as a friend.
+
+friendlyName (str) – The user’s friendly name.
+
+home (bool) – True or False if the user is invited to a Plex Home.
+
+id (int) – User’s Plex account ID.
+
+server (bool) – True or False if the user is invited to any servers.
+
+servers (List<<MyPlexServerShare>)) – Servers shared with the user.
+
+thumb (str) – Link to the users avatar.
+
+username (str) – User’s username.
+
+classplexapi.myplex.Section(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+This refers to a shared section. The raw xml for the data presented here can be found at: https://plex.tv/api/servers/{machineId}/shared_servers
+
+Variables
+:
+TAG (str) – section
+
+id (int) – The shared section ID
+
+key (int) – The shared library section key
+
+shared (bool) – If this section is shared with the user
+
+title (str) – Title of the section
+
+type (str) – movie, tvshow, artist
+
+history(maxresults=None, mindate=None)[source]
+Get all Play History for a user for this section in this shared server. :param maxresults: Only return the specified number of results (optional). :type maxresults: int :param mindate: Min datetime to return results from. :type mindate: datetime
+
+classplexapi.myplex.MyPlexServerShare(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single user’s server reference. Used for library sharing.
+
+Variables
+:
+id (int) – id for this share
+
+serverId (str) – what id plex uses for this.
+
+machineIdentifier (str) – The servers machineIdentifier
+
+name (str) – The servers name
+
+lastSeenAt (datetime) – Last connected to the server?
+
+numLibraries (int) – Total number of libraries
+
+allLibraries (bool) – True if all libraries is shared with this user.
+
+owned (bool) – 1 if the server is owned by the user
+
+pending (bool) – True if the invite is pending.
+
+section(name)[source]
+Returns the Section that matches the name specified.
+
+Parameters
+:
+name (str) – Name of the section to return.
+
+sections()[source]
+Returns a list of all Section objects shared with this user.
+
+history(maxresults=9999999, mindate=None)[source]
+Get all Play History for a user in this shared server. :param maxresults: Only return the specified number of results (optional). :type maxresults: int :param mindate: Min datetime to return results from. :type mindate: datetime
+
+classplexapi.myplex.MyPlexResource(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+This object represents resources connected to your Plex server that can provide content such as Plex Media Servers, iPhone or Android clients, etc. The raw xml for the data presented here can be found at: https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1
+
+Variables
+:
+TAG (str) – ‘Device’
+
+key (str) – ‘https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1’
+
+accessToken (str) – This resource’s Plex access token.
+
+clientIdentifier (str) – Unique ID for this resource.
+
+connections (list) – List of ResourceConnection objects for this resource.
+
+createdAt (datetime) – Timestamp this resource first connected to your server.
+
+device (str) – Best guess on the type of device this is (PS, iPhone, Linux, etc).
+
+dnsRebindingProtection (bool) – True if the server had DNS rebinding protection.
+
+home (bool) – Unknown
+
+httpsRequired (bool) – True if the resource requires https.
+
+lastSeenAt (datetime) – Timestamp this resource last connected.
+
+name (str) – Descriptive name of this resource.
+
+natLoopbackSupported (bool) – True if the resource supports NAT loopback.
+
+owned (bool) – True if this resource is one of your own (you logged into it).
+
+ownerId (int) – ID of the user that owns this resource (shared resources only).
+
+platform (str) – OS the resource is running (Linux, Windows, Chrome, etc.)
+
+platformVersion (str) – Version of the platform.
+
+presence (bool) – True if the resource is online
+
+product (str) – Plex product (Plex Media Server, Plex for iOS, Plex Web, etc.)
+
+productVersion (str) – Version of the product.
+
+provides (str) – List of services this resource provides (client, server, player, pubsub-player, etc.)
+
+publicAddressMatches (bool) – True if the public IP address matches the client’s public IP address.
+
+relay (bool) – True if this resource has the Plex Relay enabled.
+
+sourceTitle (str) – Username of the user that owns this resource (shared resources only).
+
+synced (bool) – Unknown (possibly True if the resource has synced content?)
+
+preferred_connections(ssl=None, locations=None, schemes=None)[source]
+Returns a sorted list of the available connection addresses for this resource. Often times there is more than one address specified for a server or client. Default behavior will prioritize local connections before remote or relay and HTTPS before HTTP.
+
+Parameters
+:
+ssl (bool, optional) – Set True to only connect to HTTPS connections. Set False to only connect to HTTP connections. Set None (default) to connect to any HTTP or HTTPS connection.
+
+connect(ssl=None, timeout=None, locations=None, schemes=None)[source]
+Returns a new PlexServer or PlexClient object. Uses MyPlexResource.preferred_connections() to generate the priority order of connection addresses. After trying to connect to all available addresses for this resource and assuming at least one connection was successful, the PlexServer object is built and returned.
+
+Parameters
+:
+ssl (bool, optional) – Set True to only connect to HTTPS connections. Set False to only connect to HTTP connections. Set None (default) to connect to any HTTP or HTTPS connection.
+
+timeout (int, optional) – The timeout in seconds to attempt each connection.
+
+Raises
+:
+NotFound – When unable to connect to any addresses for this resource.
+
+classplexapi.myplex.ResourceConnection(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a Resource Connection object found within the MyPlexResource objects.
+
+Variables
+:
+TAG (str) – ‘Connection’
+
+address (str) – The connection IP address
+
+httpuri (str) – Full HTTP URL
+
+ipv6 (bool) – True if the address is IPv6
+
+local (bool) – True if the address is local
+
+port (int) – The connection port
+
+protocol (str) – HTTP or HTTPS
+
+relay (bool) – True if the address uses the Plex Relay
+
+uri (str) – Full connetion URL
+
+classplexapi.myplex.MyPlexDevice(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+This object represents resources connected to your Plex server that provide playback ability from your Plex Server, iPhone or Android clients, Plex Web, this API, etc. The raw xml for the data presented here can be found at: https://plex.tv/devices.xml
+
+Variables
+:
+TAG (str) – ‘Device’
+
+key (str) – ‘https://plex.tv/devices.xml’
+
+clientIdentifier (str) – Unique ID for this resource.
+
+connections (list) – List of connection URIs for the device.
+
+device (str) – Best guess on the type of device this is (Linux, iPad, AFTB, etc).
+
+id (str) – MyPlex ID of the device.
+
+model (str) – Model of the device (bueller, Linux, x86_64, etc.)
+
+name (str) – Hostname of the device.
+
+platform (str) – OS the resource is running (Linux, Windows, Chrome, etc.)
+
+platformVersion (str) – Version of the platform.
+
+product (str) – Plex product (Plex Media Server, Plex for iOS, Plex Web, etc.)
+
+productVersion (string) – Version of the product.
+
+provides (str) – List of services this resource provides (client, controller, sync-target, player, pubsub-player).
+
+publicAddress (str) – Public IP address.
+
+screenDensity (str) – Unknown
+
+screenResolution (str) – Screen resolution (750x1334, 1242x2208, etc.)
+
+token (str) – Plex authentication token for the device.
+
+vendor (str) – Device vendor (ubuntu, etc).
+
+version (str) – Unknown (1, 2, 1.3.3.3148-b38628e, 1.3.15, etc.)
+
+connect(timeout=None)[source]
+Returns a new PlexClient or PlexServer Sometimes there is more than one address specified for a server or client. After trying to connect to all available addresses for this client and assuming at least one connection was successful, the PlexClient object is built and returned.
+
+Raises
+:
+NotFound – When unable to connect to any addresses for this device.
+
+delete()[source]
+Remove this device from your account.
+
+syncItems()[source]
+Returns an instance of SyncList for current device.
+
+Raises
+:
+BadRequest – when the device doesn’t provides sync-target.
+
+classplexapi.myplex.MyPlexPinLogin(session=None, requestTimeout=None, headers=None, oauth=False)[source]
+Bases: object
+
+MyPlex PIN login class which supports getting the four character PIN which the user must enter on https://plex.tv/link to authenticate the client and provide an access token to create a MyPlexAccount instance. This helper class supports a polling, threaded and callback approach.
+
+The polling approach expects the developer to periodically check if the PIN login was successful using checkLogin().
+
+The threaded approach expects the developer to call run() and then at a later time call waitForLogin() to wait for and check the result.
+
+The callback approach is an extension of the threaded approach and expects the developer to pass the callback parameter to the call to run(). The callback will be called when the thread waiting for the PIN login to succeed either finishes or expires. The parameter passed to the callback is the received authentication token or None if the login expired.
+
+Parameters
+:
+session (requests.Session, optional) – Use your own session object if you want to cache the http responses from PMS
+
+requestTimeout (int) – timeout in seconds on initial connect to plex.tv (default config.TIMEOUT).
+
+headers (dict) – A dict of X-Plex headers to send with requests.
+
+oauth (bool) – True to use Plex OAuth instead of PIN login.
+
+Variables
+:
+PINS (str) – ‘https://plex.tv/api/v2/pins’
+
+CHECKPINS (str) – ‘https://plex.tv/api/v2/pins/{pinid}’
+
+POLLINTERVAL (int) – 1
+
+finished (bool) – Whether the pin login has finished or not.
+
+expired (bool) – Whether the pin login has expired or not.
+
+token (str) – Token retrieved through the pin login.
+
+pin (str) – Pin to use for the login on https://plex.tv/link.
+
+propertypin
+Return the 4 character PIN used for linking a device at https://plex.tv/link.
+
+oauthUrl(forwardUrl=None)[source]
+Return the Plex OAuth url for login.
+
+Parameters
+:
+forwardUrl (str, optional) – The url to redirect the client to after login.
+
+run(callback=None, timeout=None)[source]
+Starts the thread which monitors the PIN login state.
+
+Parameters
+:
+callback (Callable[str]) – Callback called with the received authentication token (optional).
+
+timeout (int) – Timeout in seconds waiting for the PIN login to succeed (optional).
+
+Raises
+:
+RuntimeError – If the thread is already running.
+
+RuntimeError – If the PIN login for the current PIN has expired.
+
+waitForLogin()[source]
+Waits for the PIN login to succeed or expire.
+
+Parameters
+:
+callback (Callable[str]) – Callback called with the received authentication token (optional).
+
+timeout (int) – Timeout in seconds waiting for the PIN login to succeed (optional).
+
+Returns
+:
+True if the PIN login succeeded or False otherwise.
+
+stop()[source]
+Stops the thread monitoring the PIN login state.
+
+checkLogin()[source]
+Returns True if the PIN login has succeeded.
+
+classplexapi.myplex.AccountOptOut(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single AccountOptOut ‘https://plex.tv/api/v2/user/{userUUID}/settings/opt_outs’
+
+Variables
+:
+TAG (str) – optOut
+
+key (str) – Online Media Source key
+
+value (str) – Online Media Source opt_in, opt_out, or opt_out_managed
+
+optIn()[source]
+Sets the Online Media Source to “Enabled”.
+
+optOut()[source]
+Sets the Online Media Source to “Disabled”.
+
+optOutManaged()[source]
+Sets the Online Media Source to “Disabled for Managed Users”.
+
+Raises
+:
+BadRequest – When trying to opt out music.
+
+classplexapi.myplex.UserState(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single UserState
+
+Variables
+:
+TAG (str) – UserState
+
+lastViewedAt (datetime) – Datetime the item was last played.
+
+ratingKey (str) – Unique key identifying the item.
+
+type (str) – The media type of the item.
+
+viewCount (int) – Count of times the item was played.
+
+viewedLeafCount (int) – Number of items marked as played in the show/season.
+
+viewOffset (int) – Time offset in milliseconds from the start of the content
+
+viewState (bool) – True or False if the item has been played.
+
+watchlistedAt (datetime) – Datetime the item was added to the watchlist.
+
+classplexapi.myplex.GeoLocation(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a signle IP address geolocation
+
+Variables
+:
+TAG (str) – location
+
+city (str) – City name
+
+code (str) – Country code
+
+continentCode (str) – Continent code
+
+coordinates (Tuple<float>) – Latitude and longitude
+
+country (str) – Country name
+
+europeanUnionMember (bool) – True if the country is a member of the European Union
+
+inPrivacyRestrictedCountry (bool) – True if the country is privacy restricted
+
+postalCode (str) – Postal code
+
+subdivisions (str) – Subdivision name
+
+timezone (str) – Timezone
