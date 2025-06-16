@@ -36,11 +36,15 @@ This application is currently in testing and is provided **as is**. I take no re
 - `SIMKL_REDIRECT_URI` – optional custom OAuth redirect URI for Simkl. When
   unset, the address of the current UI is used automatically.
 - `TZ` – timezone for log timestamps, defaults to `Europe/Madrid`.
+- `PLEX_OWNER_TOKEN` – optional token of the Plex server owner when using a managed user.
+- `PLEX_ACCOUNT_TOKEN` – optional token for a shared server when you don't own it.
 
 
 At least one pair of Trakt or Simkl credentials is required. Plex tokens and the
 server address will be stored automatically when you sign in from the **Log in**
-tab, so you don't need to set any Plex variables.
+tab, so you normally don't need to set any Plex variables. If you prefer, you
+can populate `PLEX_TOKEN` and the optional `PLEX_OWNER_TOKEN` or
+`PLEX_ACCOUNT_TOKEN` manually before starting the container.
 
 You do **not** need to provide a Trakt access token or refresh token. The web
 interface will guide you through authorizing the app and will store the tokens
@@ -78,7 +82,7 @@ the application will trigger an immediate sync whenever an event is received.
 
 You generally don't need to obtain the token manually – simply open the **Log in**
 tab in the web interface and sign in with your Plex account. The application will
-store the token, server address and selected user automatically. If you ever need
+store the token, server address and selected user automatically. When using a managed account the owner's token will be saved as `PLEX_OWNER_TOKEN`. If the server is shared, your account token is stored in `PLEX_ACCOUNT_TOKEN`. If you ever need
 to find the token yourself:
 
 1. Open the Plex Web application and sign in.

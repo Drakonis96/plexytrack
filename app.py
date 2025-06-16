@@ -631,6 +631,7 @@ def load_plex_tokens() -> None:
             with open(PLEX_TOKEN_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             os.environ["PLEX_TOKEN"] = data.get("token", "")
+            os.environ["PLEX_OWNER_TOKEN"] = data.get("owner_token", "")
             os.environ["PLEX_ACCOUNT_TOKEN"] = data.get("account_token", "")
             os.environ["PLEX_USERNAME"] = data.get("username", "")
             os.environ["PLEX_SERVER"] = data.get("server", "")
@@ -642,6 +643,7 @@ def load_plex_tokens() -> None:
 
 def save_plex_tokens(
     token: str,
+    owner_token: str,
     account_token: str,
     username: str,
     server: str,
@@ -652,6 +654,7 @@ def save_plex_tokens(
             json.dump(
                 {
                     "token": token,
+                    "owner_token": owner_token,
                     "account_token": account_token,
                     "username": username,
                     "server": server,
@@ -661,6 +664,7 @@ def save_plex_tokens(
                 indent=2,
             )
         os.environ["PLEX_TOKEN"] = token
+        os.environ["PLEX_OWNER_TOKEN"] = owner_token
         os.environ["PLEX_ACCOUNT_TOKEN"] = account_token
         os.environ["PLEX_USERNAME"] = username
         os.environ["PLEX_SERVER"] = server
@@ -1928,9 +1932,11 @@ def login_page():
                 account = MyPlexAccount(token=session.get("account_token"))
                 token = session.get("server_token")
                 user = session.get("username")
+                owner_token = ""
                 account_token = ""
                 if session.get("owned"):
                     if selected_user and selected_user != user:
+                        owner_token = token
                         token = account.user(selected_user).get_token(session.get("machine_id"))
                         user = selected_user
                 else:
@@ -1938,6 +1944,7 @@ def login_page():
 
                 save_plex_tokens(
                     token,
+                    owner_token,
                     account_token,
                     user,
                     session.get("server_name"),
