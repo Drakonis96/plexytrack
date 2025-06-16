@@ -30,6 +30,7 @@ The application expects the following API credentials:
 
 - `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
 - `PLEX_TOKEN` – your Plex authentication token.
+- `PLEX_ACCOUNT_TOKEN` – account token when using a shared server.
 - `TRAKT_CLIENT_ID` – client ID for your Trakt application (optional if only using Simkl).
 - `TRAKT_CLIENT_SECRET` – client secret from your Trakt application (optional if only using Simkl).
 - `SIMKL_CLIENT_ID` – client ID for your Simkl application (optional if only using Trakt).
@@ -85,6 +86,7 @@ the application will trigger an immediate sync whenever an event is received.
    data for that item.
 4. Copy the value of `X-Plex-Token` from the URL bar – that's your token.
 5. If you need more details, Plex offers instructions at <https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/>.
+6. You can now use the **Log in** tab in the web interface to sign in with your Plex account and store the appropriate tokens.
 
 ## Getting Trakt API credentials
 
@@ -109,6 +111,7 @@ the application will trigger an immediate sync whenever an event is received.
 ```
 PLEX_BASEURL=http://localhost:32400
 PLEX_TOKEN=YOUR_PLEX_TOKEN
+PLEX_ACCOUNT_TOKEN=
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID

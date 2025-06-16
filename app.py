@@ -24,11 +24,13 @@ from flask import (
     redirect,
     url_for,
     has_request_context,
+    session,
+    send_file,
 )
-from flask import send_file
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
 
 from utils import (
@@ -115,6 +117,7 @@ USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 # FLASK + APSCHEDULER
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "plexytrack-secret")
 
 SYNC_INTERVAL_MINUTES = 60  # default frequency
 SYNC_COLLECTION = False
@@ -136,6 +139,8 @@ TOKEN_FILE = "trakt_tokens.json"
 
 SIMKL_REDIRECT_URI = os.environ.get("SIMKL_REDIRECT_URI")
 SIMKL_TOKEN_FILE = "simkl_tokens.json"
+
+PLEX_TOKEN_FILE = "plex_tokens.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -616,6 +621,61 @@ def exchange_code_for_simkl_tokens(code: str) -> Optional[dict]:
     save_simkl_token(data["access_token"])
     logger.info("Simkl token obtained via authorization code")
     return data
+
+
+def load_plex_tokens() -> None:
+    if os.environ.get("PLEX_TOKEN") and os.environ.get("PLEX_BASEURL"):
+        return
+    if os.path.exists(PLEX_TOKEN_FILE):
+        try:
+            with open(PLEX_TOKEN_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            os.environ["PLEX_TOKEN"] = data.get("token", "")
+            os.environ["PLEX_ACCOUNT_TOKEN"] = data.get("account_token", "")
+            os.environ["PLEX_USERNAME"] = data.get("username", "")
+            os.environ["PLEX_SERVER"] = data.get("server", "")
+            os.environ["PLEX_BASEURL"] = data.get("baseurl", "")
+            logger.info("Loaded Plex tokens from %s", PLEX_TOKEN_FILE)
+        except Exception as exc:
+            logger.error("Failed to load Plex tokens: %s", exc)
+
+
+def save_plex_tokens(
+    token: str,
+    account_token: str,
+    username: str,
+    server: str,
+    baseurl: str,
+) -> None:
+    try:
+        with open(PLEX_TOKEN_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "token": token,
+                    "account_token": account_token,
+                    "username": username,
+                    "server": server,
+                    "baseurl": baseurl,
+                },
+                f,
+                indent=2,
+            )
+        os.environ["PLEX_TOKEN"] = token
+        os.environ["PLEX_ACCOUNT_TOKEN"] = account_token
+        os.environ["PLEX_USERNAME"] = username
+        os.environ["PLEX_SERVER"] = server
+        os.environ["PLEX_BASEURL"] = baseurl
+        logger.info("Saved Plex tokens to %s", PLEX_TOKEN_FILE)
+    except Exception as exc:
+        logger.error("Failed to save Plex tokens: %s", exc)
+
+
+def get_managed_users(account):
+    try:
+        return sorted([u.title for u in account.users() if u.home])
+    except Exception as exc:
+        logger.error("Failed to retrieve managed users: %s", exc)
+        return []
 
 
 
@@ -1806,6 +1866,93 @@ def restore_backup(headers, data: dict) -> None:
 # --------------------------------------------------------------------------- #
 # FLASK ROUTES
 # --------------------------------------------------------------------------- #
+
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    """Interactive Plex login supporting managed accounts."""
+    load_plex_tokens()
+    stage = session.get("stage", 1)
+    error = None
+
+    if stage == 1:
+        if request.method == "POST":
+            email = request.form.get("email", "").strip()
+            password = request.form.get("password", "").strip()
+            code = request.form.get("code", "").strip() or None
+            try:
+                account = MyPlexAccount.signin(email, password, code=code)
+                session["account_token"] = account.authenticationToken
+                session["username"] = account.username
+                servers = [s.name for s in account.servers()]
+                session["servers"] = servers
+                session["stage"] = 2
+                return redirect(url_for("login_page"))
+            except Exception as exc:  # noqa: BLE001
+                error = f"Plex login failed: {exc}"
+        return render_template("login.html", stage=1, error=error)
+
+    if stage == 2:
+        servers = session.get("servers", [])
+        if request.method == "POST":
+            server_name = request.form.get("server")
+            try:
+                account = MyPlexAccount(token=session.get("account_token"))
+                resource = next(r for r in account.resources() if r.name == server_name and r.provides == "server")
+                server = resource.connect()
+                session["server_name"] = server.name
+                session["server_token"] = server.accessToken
+                session["machine_id"] = server.machineIdentifier
+                session["baseurl"] = server._baseurl
+                session["owned"] = getattr(server, "owned", False)
+                session["stage"] = 3
+                return redirect(url_for("login_page"))
+            except Exception as exc:  # noqa: BLE001
+                error = f"Failed connecting to server: {exc}"
+        return render_template("login.html", stage=2, error=error, servers=servers)
+
+    if stage == 3:
+        users = session.get("users")
+        if users is None:
+            try:
+                account = MyPlexAccount(token=session.get("account_token"))
+                users = get_managed_users(account)
+                users.insert(0, session.get("username"))
+                session["users"] = users
+            except Exception as exc:  # noqa: BLE001
+                error = f"Failed to retrieve users: {exc}"
+                users = [session.get("username")] if session.get("username") else []
+
+        if request.method == "POST":
+            selected_user = request.form.get("user")
+            try:
+                account = MyPlexAccount(token=session.get("account_token"))
+                token = session.get("server_token")
+                user = session.get("username")
+                account_token = ""
+                if session.get("owned"):
+                    if selected_user and selected_user != user:
+                        token = account.user(selected_user).get_token(session.get("machine_id"))
+                        user = selected_user
+                else:
+                    account_token = account.authenticationToken
+
+                save_plex_tokens(
+                    token,
+                    account_token,
+                    user,
+                    session.get("server_name"),
+                    session.get("baseurl"),
+                )
+                session.clear()
+                return redirect(url_for("index", message="Plex login successful!", mtype="success"))
+            except Exception as exc:  # noqa: BLE001
+                error = f"Error saving tokens: {exc}"
+
+        return render_template("login.html", stage=3, error=error, users=users)
+
+    session.clear()
+    return redirect(url_for("login_page"))
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
@@ -2078,6 +2225,7 @@ def plex_webhook():
 # --------------------------------------------------------------------------- #
 def test_connections() -> bool:
     global plex
+    load_plex_tokens()
     plex_baseurl = os.environ.get("PLEX_BASEURL")
     plex_token = os.environ.get("PLEX_TOKEN")
     trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
