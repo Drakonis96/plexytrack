@@ -1570,8 +1570,11 @@ def sync():
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
 
-    account_id_env = os.environ.get("PLEX_USER_ID")
-    account_id = int(account_id_env) if account_id_env else None
+    owner_token = os.environ.get("PLEX_OWNER_TOKEN")
+    account_id = None
+    if plex._token == owner_token:
+        aid = os.environ.get("PLEX_USER_ID")
+        account_id = int(aid) if aid else None
     plex_movies, plex_episodes = get_plex_history(plex, account_id)
     logger.info(
         "Found %d movies and %d episodes in Plex history.",
@@ -2050,6 +2053,11 @@ def login_page():
                 else:
                     account_token = account.authenticationToken
 
+                role_map = {u: r for u, r, _ in session.get("users", [])}
+                uid = next((uid for u, _, uid in session.get("users", []) if u == user), None)
+                if role_map.get(user) == "managed":
+                    uid = None
+
                 save_plex_tokens(
                     token,
                     owner_token,
@@ -2057,7 +2065,7 @@ def login_page():
                     user,
                     session.get("server_name"),
                     session.get("baseurl"),
-                    next((uid for u, _, uid in session.get("users", []) if u == user), None),
+                    uid,
                 )
                 session["stage"] = 4
                 session["username"] = user

@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Dict, Optional, Set, Tuple
 
 from utils import (
