@@ -1177,7 +1177,8 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    history_kwargs = {"accountID": account_id} if account_id else {}
+    is_owner = os.environ.get("PLEX_OWNER_TOKEN") == getattr(plex, "_token", None)
+    history_kwargs = {"accountID": account_id} if (account_id and is_owner) else {}
     for entry in plex.history(**history_kwargs):
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
