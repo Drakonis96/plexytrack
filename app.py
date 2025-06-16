@@ -11,6 +11,8 @@ PlexyTrackt – Synchronizes Plex watched history with Trakt.
 import os
 import json
 import logging
+
+from plexapi.exceptions import Unauthorized
 from datetime import datetime, timezone
 from numbers import Number
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -1178,7 +1180,21 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
 
     logger.info("Fetching Plex history…")
     history_kwargs = {"accountID": account_id} if account_id else {}
-    for entry in plex.history(**history_kwargs):
+    try:
+        history = plex.history(**history_kwargs)
+    except Unauthorized:
+        if account_id:
+            logger.warning(
+                "Unauthorized for account %s, fetching current user history", account_id
+            )
+            history = plex.history()
+        else:
+            raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Plex history: %s", exc)
+        return movies, episodes
+
+    for entry in history:
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         # Movies

@@ -1,6 +1,8 @@
 import logging
 from typing import Dict, Optional, Set, Tuple
 
+from plexapi.exceptions import Unauthorized
+
 from utils import (
     _parse_guid_value,
     get_show_from_library,
@@ -36,7 +38,21 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
 
     logger.info("Fetching Plex history…")
     history_kwargs = {"accountID": account_id} if account_id else {}
-    for entry in plex.history(**history_kwargs):
+    try:
+        history = plex.history(**history_kwargs)
+    except Unauthorized:
+        if account_id:
+            logger.warning(
+                "Unauthorized for account %s, fetching current user history", account_id
+            )
+            history = plex.history()
+        else:
+            raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Plex history: %s", exc)
+        return movies, episodes
+
+    for entry in history:
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         if entry.type == "movie":
