@@ -1991,7 +1991,9 @@ def login_page():
                 if session.get("owned"):
                     if selected_user and selected_user != user:
                         owner_token = token
-                        token = account.user(selected_user).get_token(session.get("machine_id"))
+                        role = dict(session.get("users", [])).get(selected_user)
+                        if role != "managed":
+                            token = account.user(selected_user).get_token(session.get("machine_id"))
                         user = selected_user
                 else:
                     account_token = account.authenticationToken
@@ -2306,7 +2308,10 @@ def test_connections() -> bool:
 
     try:
         plex = PlexServer(plex_baseurl, plex_token)
-        plex.account()
+        if os.environ.get("PLEX_OWNER_TOKEN"):
+            plex.library.sections()
+        else:
+            plex.account()
         logger.info("Successfully connected to Plex.")
     except Exception as exc:
         logger.error("Failed to connect to Plex: %s", exc)
