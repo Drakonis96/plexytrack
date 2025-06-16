@@ -1905,13 +1905,6 @@ def plex_login():
     global plex_account
     error = None
     username = ""
-    load_plex_token()
-    if request.method == "GET" and os.environ.get("PLEX_TOKEN"):
-        return render_template(
-            "login.html",
-            logged_in=True,
-            current_user=os.environ.get("PLEX_USER", ""),
-        )
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -1941,7 +1934,7 @@ def plex_login():
             "login.html", users=users, username=username, error=error
         )
 
-    return render_template("login.html", error=error, username=username, logged_in=False)
+    return render_template("login.html", error=error, username=username)
 
 
 @app.route("/login/select", methods=["POST"])
