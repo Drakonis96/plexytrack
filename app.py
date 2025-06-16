@@ -1946,11 +1946,22 @@ def login_page():
             try:
                 servers = session.get("servers", [])
                 info = next(s for s in servers if s["name"] == server_name)
-                server = PlexServer(info["baseurl"], session.get("account_token"))
+                baseurl = info.get("baseurl")
+                if not baseurl:
+                    account = MyPlexAccount(token=session.get("account_token"))
+                    resource = next(
+                        r
+                        for r in account.resources()
+                        if r.name == server_name and "server" in r.provides
+                    )
+                    server = resource.connect()
+                    baseurl = server._baseurl
+                else:
+                    server = PlexServer(baseurl, session.get("account_token"))
                 session["server_name"] = getattr(server, "friendlyName", None) or info["name"]
                 session["server_token"] = session.get("account_token")
                 session["machine_id"] = info.get("machine_id")
-                session["baseurl"] = info["baseurl"]
+                session["baseurl"] = baseurl
                 session["owned"] = info.get("owned", False)
                 session["stage"] = 3
                 return redirect(url_for("login_page"))
