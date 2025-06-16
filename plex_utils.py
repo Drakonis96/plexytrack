@@ -1,6 +1,5 @@
 import logging
 from typing import Dict, Optional, Set, Tuple
-from plexapi.exceptions import Unauthorized
 
 from utils import (
     _parse_guid_value,
@@ -25,26 +24,14 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    try:
-        history_iter = plex.history(accountID=account_id)
-    except Unauthorized as e:  # type: ignore[name-defined]
-        logger.warning("Token inválido o sin permisos: %s", e)
-        logger.warning(
-            "Confirma que el ID %s es correcto y que el token es del propietario",
-            account_id,
-        )
-        raise
-
-    for entry in history_iter:
+    for entry in plex.history(accountID=account_id):
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         if entry.type == "movie":
             try:
                 item = entry.source() or plex.fetchItem(entry.ratingKey)
             except Exception as exc:
-                logger.debug(
-                    "Failed to fetch movie %s from Plex: %s", entry.ratingKey, exc
-                )
+                logger.debug("Failed to fetch movie %s from Plex: %s", entry.ratingKey, exc)
                 continue
             title = item.title
             year = normalize_year(getattr(item, "year", None))
@@ -65,9 +52,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
             try:
                 item = entry.source() or plex.fetchItem(entry.ratingKey)
             except Exception as exc:
-                logger.debug(
-                    "Failed to fetch episode %s from Plex: %s", entry.ratingKey, exc
-                )
+                logger.debug("Failed to fetch episode %s from Plex: %s", entry.ratingKey, exc)
                 item = None
             if item:
                 season = season or item.seasonNumber
@@ -130,9 +115,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
                             "guid": guid,
                         }
         except Exception as exc:
-            logger.debug(
-                "Failed fetching watched items from section %s: %s", section.title, exc
-            )
+            logger.debug("Failed fetching watched items from section %s: %s", section.title, exc)
 
     return movies, episodes
 
@@ -140,9 +123,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
 def update_plex(
     plex,
     movies: Set[Tuple[str, Optional[int], Optional[str]]],
-    episodes: Set[
-        Tuple[str, str, Optional[str]]
-    ],  # Only allow str for key, not Tuple fallback
+    episodes: Set[Tuple[str, str, Optional[str]]],  # Only allow str for key, not Tuple fallback
     account_id: Optional[int] = None,
 ) -> None:
     """Mark items as watched in Plex when missing."""
@@ -153,12 +134,7 @@ def update_plex(
         if guid and valid_guid(guid):
             try:
                 item = find_item_by_guid(plex, guid)
-                if (
-                    item
-                    and getattr(
-                        item, "isWatched", lambda: bool(getattr(item, "viewCount", 0))
-                    )()
-                ):
+                if item and getattr(item, "isWatched", lambda: bool(getattr(item, "viewCount", 0)))():
                     continue
                 if item:
                     if account_id:
@@ -184,9 +160,7 @@ def update_plex(
             try:
                 results = section.search(title=title)
                 for candidate in results:
-                    if year is None or normalize_year(
-                        getattr(candidate, "year", None)
-                    ) == normalize_year(year):
+                    if year is None or normalize_year(getattr(candidate, "year", None)) == normalize_year(year):
                         found = candidate
                         break
                 if found:
@@ -200,9 +174,7 @@ def update_plex(
 
         try:
             # Check if already watched using isWatched property or viewCount
-            is_watched = getattr(found, "isWatched", False) or bool(
-                getattr(found, "viewCount", 0)
-            )
+            is_watched = getattr(found, "isWatched", False) or bool(getattr(found, "viewCount", 0))
             if is_watched:
                 continue
             if account_id:
@@ -231,9 +203,7 @@ def update_plex(
                 item = find_item_by_guid(plex, guid)
                 if item:
                     # Check if already watched using isWatched property or viewCount
-                    is_watched = getattr(item, "isWatched", False) or bool(
-                        getattr(item, "viewCount", 0)
-                    )
+                    is_watched = getattr(item, "isWatched", False) or bool(getattr(item, "viewCount", 0))
                     if is_watched:
                         continue
                     if account_id:
@@ -267,9 +237,7 @@ def update_plex(
             # Try to find the episode using the show's episode method
             ep_obj = show_obj.episode(season=season_num, episode=episode_num)
             # Check if already watched using isWatched property or viewCount
-            is_watched = getattr(ep_obj, "isWatched", False) or bool(
-                getattr(ep_obj, "viewCount", 0)
-            )
+            is_watched = getattr(ep_obj, "isWatched", False) or bool(getattr(ep_obj, "viewCount", 0))
             if is_watched:
                 continue
             if account_id:
@@ -285,15 +253,9 @@ def update_plex(
                 ep_obj.markWatched()
             episode_count += 1
         except Exception as exc:
-            logger.debug(
-                "Failed marking episode %s - %s as watched: %s", show_title, code, exc
-            )
+            logger.debug("Failed marking episode %s - %s as watched: %s", show_title, code, exc)
 
     if movie_count or episode_count:
-        logger.info(
-            "Marked %d movies and %d episodes as watched in Plex",
-            movie_count,
-            episode_count,
-        )
+        logger.info("Marked %d movies and %d episodes as watched in Plex", movie_count, episode_count)
     else:
         logger.info("Nothing new to send to Plex.")
