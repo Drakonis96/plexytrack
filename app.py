@@ -2028,10 +2028,15 @@ def plex_select_user():
         if user_id == "account":
             user_name = plex_account.username or "admin"
             account_id = plex_account.id
+            token = os.environ.get("PLEX_TOKEN") or plex_account.authenticationToken
+            user_account = plex_account
         else:
             user_obj = next(u for u in plex_account.users() if str(u.id) == user_id)
             user_name = user_obj.title
             account_id = user_obj.id
+            # Switch account to obtain a token scoped to the managed user
+            user_account = plex_account.switchHomeUser(user_obj)
+            token = user_account.authenticationToken
 
         baseurl = os.environ.get("PLEX_BASEURL", "").rstrip("/")
         parsed = urlparse(baseurl)
@@ -2055,9 +2060,7 @@ def plex_select_user():
             if server_resource:
                 break
 
-        admin_token = os.environ.get("PLEX_TOKEN") or plex_account.authenticationToken
         if server_resource:
-            token = admin_token
             plex = PlexServer(baseurl or server_resource.connections[0].uri, token)
             os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
         else:
@@ -2069,18 +2072,15 @@ def plex_select_user():
                 (r for r in plex_account.resources() if "server" in r.provides), None
             )
             if alt_resource:
-                token = admin_token
                 plex = PlexServer(baseurl or alt_resource.connections[0].uri, token)
                 os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
             else:
-                token = admin_token
                 plex = PlexServer(baseurl, token)
 
-        if not os.environ.get("PLEX_TOKEN"):
-            os.environ["PLEX_TOKEN"] = admin_token
-
+        os.environ["PLEX_TOKEN"] = token
         os.environ["PLEX_USER"] = user_name
         os.environ["PLEX_ACCOUNT_ID"] = str(account_id)
+        plex_account = user_account
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed selecting Plex user: %s", exc)
         users = [{"id": "account", "title": plex_account.username or "Admin"}]
