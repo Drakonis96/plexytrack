@@ -1177,8 +1177,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    is_owner = os.environ.get("PLEX_OWNER_TOKEN") == getattr(plex, "_token", None)
-    history_kwargs = {"accountID": account_id} if (account_id and is_owner) else {}
+    history_kwargs = {"accountID": account_id} if account_id else {}
     for entry in plex.history(**history_kwargs):
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
@@ -2038,9 +2037,15 @@ def login_page():
                 if session.get("owned"):
                     if selected_user and selected_user != user:
                         owner_token = token
-                        token = account.user(selected_user).get_token(
-                            session.get("machine_id")
-                        )
+                        role_map = {u: r for u, r, _ in session.get("users", [])}
+                        if role_map.get(selected_user) == "managed":
+                            server_owner = PlexServer(session.get("baseurl"), token)
+                            user_server = server_owner.switchUser(selected_user)
+                            token = getattr(user_server, "_token", token)
+                        else:
+                            token = account.user(selected_user).get_token(
+                                session.get("machine_id")
+                            )
                         user = selected_user
                 else:
                     account_token = account.authenticationToken
