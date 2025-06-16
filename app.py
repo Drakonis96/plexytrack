@@ -2116,11 +2116,28 @@ def users_page():
         except ValueError:
             uid = None
         if uid is not None:
-            try:
-                history = plex_server.history(accountID=uid, maxresults=None)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to fetch history for user %s: %s", uid, exc)
-                history = []
+            user_obj = next((u for u in account.users() if u.id == uid), None)
+            history = []
+            if user_obj is not None:
+                # First try using the admin token with accountID filter
+                try:
+                    plex_server.account()  # verify token
+                    history = plex_server.history(accountID=uid, maxresults=None)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Admin token failed for user %s: %s", uid, exc
+                    )
+                    try:
+                        user_server = plex_server.switchUser(user_obj)
+                        user_server.account()  # verify user token
+                        history = user_server.history(accountID=uid, maxresults=None)
+                    except Exception as exc2:  # noqa: BLE001
+                        logger.error(
+                            "Failed to fetch history with user token for %s: %s",
+                            uid,
+                            exc2,
+                        )
+                        history = []
             movie_ids = {h.ratingKey for h in history if getattr(h, "type", "") == "movie"}
             episode_ids = {h.ratingKey for h in history if getattr(h, "type", "") == "episode"}
             watch_counts = {
