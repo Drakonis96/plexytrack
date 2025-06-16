@@ -2115,17 +2115,18 @@ def users_page():
             uid = int(selected_id)
         except ValueError:
             uid = None
-        if uid == account.id:
-            history = account.history()
-        else:
-            target = next((u for u in account.users() if u.id == uid), None)
-            history = target.history() if target and not target.friend else []
-        movies = [h for h in history if getattr(h, "type", "") == "movie"]
-        episodes = [h for h in history if getattr(h, "type", "") == "episode"]
-        watch_counts = {
-            "movies": len(movies),
-            "episodes": len(episodes),
-        }
+        if uid is not None:
+            try:
+                history = plex_server.history(accountID=uid, maxresults=None)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to fetch history for user %s: %s", uid, exc)
+                history = []
+            movie_ids = {h.ratingKey for h in history if getattr(h, "type", "") == "movie"}
+            episode_ids = {h.ratingKey for h in history if getattr(h, "type", "") == "episode"}
+            watch_counts = {
+                "movies": len(movie_ids),
+                "episodes": len(episode_ids),
+            }
 
     return render_template(
         "users.html",
