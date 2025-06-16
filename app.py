@@ -724,6 +724,7 @@ def get_account_servers(token: str) -> List[dict]:
                     "source": res.get("sourceTitle", ""),
                     "machine_id": res.get("clientIdentifier"),
                     "baseurl": baseurl,
+                    "token": res.get("accessToken"),
                 }
             )
     except Exception as exc:  # noqa: BLE001
@@ -750,6 +751,7 @@ def get_account_servers(token: str) -> List[dict]:
                         "source": getattr(res, "sourceTitle", ""),
                         "machine_id": res.clientIdentifier,
                         "baseurl": baseurl,
+                        "token": getattr(res, "accessToken", None),
                     }
                 )
         except Exception as exc:  # noqa: BLE001
@@ -1987,7 +1989,8 @@ def login_page():
                 servers = session.get("servers", [])
                 info = next(s for s in servers if s["name"] == server_name)
                 baseurl = info.get("baseurl")
-                if not baseurl:
+                token = info.get("token")
+                if not baseurl or not token:
                     account = MyPlexAccount(token=session.get("account_token"))
                     resource = next(
                         r
@@ -1996,10 +1999,11 @@ def login_page():
                     )
                     server = resource.connect()
                     baseurl = server._baseurl
+                    token = server._token
                 else:
-                    server = PlexServer(baseurl, session.get("account_token"))
+                    server = PlexServer(baseurl, token)
                 session["server_name"] = getattr(server, "friendlyName", None) or info["name"]
-                session["server_token"] = session.get("account_token")
+                session["server_token"] = token
                 session["machine_id"] = info.get("machine_id")
                 session["baseurl"] = baseurl
                 session["owned"] = info.get("owned", False)
