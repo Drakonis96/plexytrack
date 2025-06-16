@@ -695,12 +695,14 @@ def get_account_servers(token: str) -> List[dict]:
     headers = {
         "Accept": "application/json",
         "X-Plex-Token": token,
-        "X-Plex-Client-Identifier": os.environ.get("PLEXAPI_CLIENT_IDENTIFIER", PLEX_CLIENT_ID),
+        "X-Plex-Client-Identifier": os.environ.get(
+            "PLEXAPI_CLIENT_IDENTIFIER", PLEX_CLIENT_ID
+        ),
     }
+    servers = []
     try:
         resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
-        servers = []
         for res in resp.json():
             if "server" not in res.get("provides", ""):
                 continue
@@ -720,10 +722,35 @@ def get_account_servers(token: str) -> List[dict]:
                     "baseurl": baseurl,
                 }
             )
-        return servers
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to retrieve servers: %s", exc)
-        return []
+        logger.error("Failed to retrieve servers via API v2: %s", exc)
+
+    # Fallback to MyPlexAccount.resources() if API call failed or returned no servers
+    if not servers:
+        try:
+            account = MyPlexAccount(token=token)
+            for res in account.resources():
+                if "server" not in res.provides:
+                    continue
+                baseurl = None
+                for conn in res.connections:
+                    if conn.protocol == "https":
+                        baseurl = conn.uri
+                        break
+                if not baseurl and res.connections:
+                    baseurl = res.connections[0].uri
+                servers.append(
+                    {
+                        "name": res.name,
+                        "owned": getattr(res, "owned", False),
+                        "source": getattr(res, "sourceTitle", ""),
+                        "machine_id": res.clientIdentifier,
+                        "baseurl": baseurl,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Fallback retrieval of servers failed: %s", exc)
+    return servers
 
 
 
