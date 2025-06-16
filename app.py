@@ -97,13 +97,15 @@ for handler in root_logger.handlers[:]:
 
 # Add a single console handler
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+console_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+)
 root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 
 # Configure werkzeug (Flask's HTTP request logger) to reduce verbosity
-werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger = logging.getLogger("werkzeug")
 werkzeug_logger.setLevel(logging.WARNING)
 
 # --------------------------------------------------------------------------- #
@@ -370,11 +372,11 @@ def guid_to_ids(guid: Union[str, Tuple[str, str]]) -> Dict[str, Union[str, int]]
     # Handle tuple format (used for episodes: (guid, episode_info))
     if isinstance(guid, tuple):
         guid = guid[0] if guid else ""
-    
+
     # Handle string format
     if not isinstance(guid, str):
         return {}
-        
+
     if guid.startswith("imdb://"):
         return {"imdb": guid.split("imdb://", 1)[1]}
     if guid.startswith("tmdb://"):
@@ -384,7 +386,6 @@ def guid_to_ids(guid: Union[str, Tuple[str, str]]) -> Dict[str, Union[str, int]]
     if guid.startswith("anidb://"):
         return {"anidb": int(guid.split("anidb://", 1)[1])}
     return {}
-
 
 
 def trakt_movie_key(m: dict) -> Union[str, Tuple[str, Optional[int]]]:
@@ -466,7 +467,6 @@ def simkl_episode_key(show: dict, e: dict) -> Optional[Union[str, Tuple[str, str
     if base_guid:
         return (base_guid, code)
     return (show.get("title", "").lower(), code)
-
 
 
 # --------------------------------------------------------------------------- #
@@ -644,11 +644,12 @@ def save_plex_token(token: str, user: str, account_id: int) -> None:
     """Persist Plex user token to file."""
     try:
         with open(PLEX_TOKEN_FILE, "w", encoding="utf-8") as f:
-            json.dump({"token": token, "user": user, "account_id": account_id}, f, indent=2)
+            json.dump(
+                {"token": token, "user": user, "account_id": account_id}, f, indent=2
+            )
         logger.info("Saved Plex token to %s", PLEX_TOKEN_FILE)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save Plex token: %s", exc)
-
 
 
 def trakt_request(
@@ -711,18 +712,27 @@ def simkl_request(
     attempt = 0
     while True:
         try:
-            resp = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+            resp = requests.request(
+                method, url, headers=headers, timeout=timeout, **kwargs
+            )
             resp.raise_for_status()
             return resp
         except requests.exceptions.ReadTimeout as exc:
             if attempt >= retries:
-                logger.error("Simkl ReadTimeout tras %d intentos (%d s).", attempt + 1, timeout)
+                logger.error(
+                    "Simkl ReadTimeout tras %d intentos (%d s).", attempt + 1, timeout
+                )
                 raise
             attempt += 1
             timeout *= 2  # back-off exponencial
             logger.warning(
                 "Simkl request %s %s agotó el tiempo (%s). Reintentando (%d/%d) con timeout=%ds…",
-                method.upper(), endpoint, exc, attempt, retries, timeout,
+                method.upper(),
+                endpoint,
+                exc,
+                attempt,
+                retries,
+                timeout,
             )
         except requests.exceptions.RequestException:
             # Para otros errores de red no merece volver a intentar; relanzamos.
@@ -795,7 +805,7 @@ def trakt_search_ids(
     result = data[0]
     media_type = "movie" if is_movie else "show"
     media_item = result.get(media_type, {})
-    
+
     ids = media_item.get("ids", {}) or {}
     # Normalize integer IDs
     for k, v in list(ids.items()):
@@ -829,7 +839,7 @@ def get_simkl_history(
     Dict[str, Tuple[str, str, Optional[str]]],
 ]:
     """Return Simkl movie and episode history keyed by best GUID.
-    
+
     Returns:
         Tuple containing:
         - Movies: Dict[guid, (title, year, watched_at)]
@@ -927,7 +937,9 @@ def update_simkl(
             if not ids:
                 ids = simkl_search_ids(headers, show_title, is_movie=False)
                 if ids:
-                    logger.debug("IDs found in Simkl for show '%s': %s", show_title, ids)
+                    logger.debug(
+                        "IDs found in Simkl for show '%s': %s", show_title, ids
+                    )
             if not ids:
                 logger.warning(
                     "Skipping episode '%s - %s' - no IDs found", show_title, code
@@ -951,7 +963,9 @@ def update_simkl(
             season_found = False
             for s in shows[key]["seasons"]:
                 if s["number"] == season_num:
-                    s["episodes"].append({"number": episode_num, "watched_at": watched_at})
+                    s["episodes"].append(
+                        {"number": episode_num, "watched_at": watched_at}
+                    )
                     season_found = True
                     break
 
@@ -975,9 +989,7 @@ def update_simkl(
         len(payload.get("shows", [])),
     )
     try:
-        response = simkl_request(
-            "post", "/sync/history", headers, json=payload
-        )
+        response = simkl_request("post", "/sync/history", headers, json=payload)
         # Simkl puede devolver 429 incluso en éxito, comprobaremos el cuerpo
         if response.status_code == 429:
             try:
@@ -1124,15 +1136,17 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
                             series_guid = _parse_guid_value(gp_guid_raw)
 
                         # (2) From cache
-                        if series_guid is None and show_title and show_title in show_guid_cache:
+                        if (
+                            series_guid is None
+                            and show_title
+                            and show_title in show_guid_cache
+                        ):
                             series_guid = show_guid_cache[show_title]
 
                         # (3) From library search if still no GUID
                         if series_guid is None and show_title:
                             series_obj = get_show_from_library(plex, show_title)
-                            series_guid = (
-                                imdb_guid(series_obj) if series_obj else None
-                            )
+                            series_guid = imdb_guid(series_obj) if series_obj else None
                             show_guid_cache[show_title] = series_guid
 
                         # Key composition
@@ -1245,7 +1259,7 @@ def update_trakt(
         except (ValueError, IndexError):
             logger.warning("Invalid episode code format: %s", code)
             continue
-            
+
         ep_obj = {"season": season, "number": number}
         if guid:
             ep_obj["ids"] = guid_to_ids(guid)
@@ -1299,7 +1313,9 @@ def update_simkl(
             if not ids:
                 ids = simkl_search_ids(headers, show_title, is_movie=False)
                 if ids:
-                    logger.debug("IDs found in Simkl for show '%s': %s", show_title, ids)
+                    logger.debug(
+                        "IDs found in Simkl for show '%s': %s", show_title, ids
+                    )
             if not ids:
                 logger.warning(
                     "Skipping episode '%s - %s' - no IDs found", show_title, code
@@ -1323,7 +1339,9 @@ def update_simkl(
             season_found = False
             for s in shows[key]["seasons"]:
                 if s["number"] == season_num:
-                    s["episodes"].append({"number": episode_num, "watched_at": watched_at})
+                    s["episodes"].append(
+                        {"number": episode_num, "watched_at": watched_at}
+                    )
                     season_found = True
                     break
 
@@ -1347,9 +1365,7 @@ def update_simkl(
         len(payload.get("shows", [])),
     )
     try:
-        response = simkl_request(
-            "post", "/sync/history", headers, json=payload
-        )
+        response = simkl_request("post", "/sync/history", headers, json=payload)
         # Simkl puede devolver 429 incluso en éxito, comprobaremos el cuerpo
         if response.status_code == 429:
             try:
@@ -1529,11 +1545,13 @@ def sync():
             # Plex -> Simkl
             if last_sync:
                 movies_to_add = {
-                    k for k, v in plex_movies.items()
+                    k
+                    for k, v in plex_movies.items()
                     if v.get("watched_at") and v["watched_at"] > last_sync
                 }
                 episodes_to_add = {
-                    k for k, v in plex_episodes.items()
+                    k
+                    for k, v in plex_episodes.items()
                     if v.get("watched_at") and v["watched_at"] > last_sync
                 }
             else:
@@ -1570,7 +1588,9 @@ def sync():
                     if show_obj:
                         show_guid = imdb_guid(show_obj) or best_guid(show_obj)
                 except Exception as exc:
-                    logger.debug("Failed to obtain GUID for show %s: %s", show_title, exc)
+                    logger.debug(
+                        "Failed to obtain GUID for show %s: %s", show_title, exc
+                    )
 
                 # Si seguimos sin GUID de serie, recurrimos al GUID del episodio como último recurso.
                 if show_guid is None:
@@ -1584,7 +1604,7 @@ def sync():
                         watched_at,
                     )
                 )
-            
+
             if movies_to_add_fmt or episodes_to_add_fmt:
                 update_simkl(headers, movies_to_add_fmt, episodes_to_add_fmt)
 
@@ -1597,8 +1617,7 @@ def sync():
                 len(episodes_to_add_plex),
             )
             movies_to_add_plex_fmt = {
-                (simkl_movies[m][0], simkl_movies[m][1], m)
-                for m in movies_to_add_plex
+                (simkl_movies[m][0], simkl_movies[m][1], m) for m in movies_to_add_plex
             }
             episodes_to_add_plex_fmt = {
                 (simkl_episodes[e][0], simkl_episodes[e][1], e)
@@ -1607,7 +1626,9 @@ def sync():
             if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
                 account_id_env = os.environ.get("PLEX_ACCOUNT_ID")
                 account_id = int(account_id_env) if account_id_env else None
-                update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt, account_id)
+                update_plex(
+                    plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt, account_id
+                )
 
             if current_activity:
                 save_last_sync_date(current_activity)
@@ -1809,10 +1830,10 @@ def index():
             SYNC_LIKED_LISTS = False
             SYNC_WATCHLISTS = False
             LIVE_SYNC = False
-        
+
         # Only start scheduler when manually requested from sync tab
         start_scheduler()
-        
+
         # Trigger an immediate sync by updating the next run time
         job = scheduler.get_job("sync_job")
         if job:
@@ -1959,7 +1980,9 @@ def plex_login():
             error=error,
         )
 
-    return render_template("login.html", error=error, username=username, logged_in=False)
+    return render_template(
+        "login.html", error=error, username=username, logged_in=False
+    )
 
 
 @app.route("/login/select", methods=["POST"])
@@ -1972,31 +1995,29 @@ def plex_select_user():
     server_id = request.form.get("server_id")
     try:
         if user_id == "account":
-            sub = plex_account
             user_name = plex_account.username or "admin"
             account_id = plex_account.id
         else:
             user_obj = next(u for u in plex_account.users() if str(u.id) == user_id)
-            sub = plex_account.switchHomeUser(user_obj)
             user_name = user_obj.title
             account_id = user_obj.id
 
         baseurl = os.environ.get("PLEX_BASEURL", "").rstrip("/")
         parsed = urlparse(baseurl)
         server_resource = None
-        for res in sub.resources():
+        for res in plex_account.resources():
             if "server" not in res.provides:
                 continue
             if server_id and res.clientIdentifier == server_id:
                 server_resource = res
                 break
             for conn in res.connections:
-                if (
-                    urlparse(conn.uri).hostname == parsed.hostname
-                    and (
-                        (urlparse(conn.uri).port or (443 if parsed.scheme == "https" else 80))
-                        == (parsed.port or (443 if parsed.scheme == "https" else 80))
+                if urlparse(conn.uri).hostname == parsed.hostname and (
+                    (
+                        urlparse(conn.uri).port
+                        or (443 if parsed.scheme == "https" else 80)
                     )
+                    == (parsed.port or (443 if parsed.scheme == "https" else 80))
                 ):
                     server_resource = res
                     break
@@ -2013,14 +2034,14 @@ def plex_select_user():
             # server token is used instead of the generic account token which
             # can lead to 401 errors.
             alt_resource = next(
-                (r for r in sub.resources() if "server" in r.provides), None
+                (r for r in plex_account.resources() if "server" in r.provides), None
             )
             if alt_resource:
                 plex = alt_resource.connect()
                 token = plex._token
                 os.environ["PLEX_BASEURL"] = plex._baseurl.rstrip("/")
             else:
-                token = sub.authenticationToken
+                token = plex_account.authenticationToken
                 plex = PlexServer(baseurl, token)
 
         os.environ["PLEX_TOKEN"] = token
@@ -2037,7 +2058,10 @@ def plex_select_user():
         except Exception:
             pass
         return render_template(
-            "login.html", users=users, username=plex_account.username, error_select="Failed to select user"
+            "login.html",
+            users=users,
+            username=plex_account.username,
+            error_select="Failed to select user",
         )
 
     return redirect(url_for("index"))
@@ -2277,7 +2301,6 @@ def test_connections() -> bool:
         except Exception as exc:
             logger.error("Failed to connect to Simkl: %s", exc)
             return False
-
 
     return True
 
