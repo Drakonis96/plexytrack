@@ -1180,16 +1180,22 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
 
     logger.info("Fetching Plex history…")
     history_kwargs = {"accountID": account_id} if account_id else {}
+
+    server = plex
+    owner_token = os.environ.get("PLEX_OWNER_TOKEN")
+    if account_id and owner_token and plex._token != owner_token:
+        try:
+            server = PlexServer(plex._baseurl, owner_token, session=plex._session)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to connect with owner token: %s", exc)
+            server = plex
+
     try:
-        history = plex.history(**history_kwargs)
+        history = server.history(**history_kwargs)
     except Unauthorized:
         if account_id:
-            logger.warning(
-                "Unauthorized for account %s, fetching current user history", account_id
-            )
-            history = plex.history()
-        else:
-            raise
+            logger.warning("Unauthorized for account %s", account_id)
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to fetch Plex history: %s", exc)
         return movies, episodes
