@@ -633,18 +633,16 @@ def load_plex_token() -> None:
                 data = json.load(f)
             os.environ["PLEX_TOKEN"] = data.get("token", "")
             os.environ["PLEX_USER"] = data.get("user", "")
-            if "account_id" in data:
-                os.environ["PLEX_ACCOUNT_ID"] = str(data.get("account_id"))
             logger.info("Loaded Plex token from %s", PLEX_TOKEN_FILE)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to load Plex token: %s", exc)
 
 
-def save_plex_token(token: str, user: str, account_id: int) -> None:
+def save_plex_token(token: str, user: str) -> None:
     """Persist Plex user token to file."""
     try:
         with open(PLEX_TOKEN_FILE, "w", encoding="utf-8") as f:
-            json.dump({"token": token, "user": user, "account_id": account_id}, f, indent=2)
+            json.dump({"token": token, "user": user}, f, indent=2)
         logger.info("Saved Plex token to %s", PLEX_TOKEN_FILE)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save Plex token: %s", exc)
@@ -996,7 +994,7 @@ def update_simkl(
 # --------------------------------------------------------------------------- #
 # PLEX ↔ TRAKT
 # --------------------------------------------------------------------------- #
-def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
+def get_plex_history(plex) -> Tuple[
     Dict[str, Dict[str, Optional[str]]],
     Dict[str, Dict[str, Optional[str]]],
 ]:
@@ -1007,7 +1005,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
     show_guid_cache: Dict[str, Optional[str]] = {}
 
     logger.info("Fetching Plex history…")
-    for entry in plex.history(accountID=account_id):
+    for entry in plex.history():
         watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
         # Movies
@@ -1095,7 +1093,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
     for section in plex.library.sections():
         try:
             if section.type == "movie":
-                for item in section.search(viewCount__gt=0, accountID=account_id):
+                for item in section.search(viewCount__gt=0):
                     title = item.title
                     year = normalize_year(getattr(item, "year", None))
                     guid = imdb_guid(item)
@@ -1107,7 +1105,7 @@ def get_plex_history(plex, account_id: Optional[int] = None) -> Tuple[
                             "guid": guid,
                         }
             elif section.type == "show":
-                for ep in section.searchEpisodes(viewCount__gt=0, accountID=account_id):
+                for ep in section.searchEpisodes(viewCount__gt=0):
                     code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
                     guid = imdb_guid(ep)
                     show_title = getattr(ep, "grandparentTitle", None)
@@ -1398,9 +1396,7 @@ def sync():
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
 
-    account_id_env = os.environ.get("PLEX_ACCOUNT_ID")
-    account_id = int(account_id_env) if account_id_env else None
-    plex_movies, plex_episodes = get_plex_history(plex, account_id)
+    plex_movies, plex_episodes = get_plex_history(plex)
     logger.info(
         "Found %d movies and %d episodes in Plex history.",
         len(plex_movies),
@@ -1479,9 +1475,7 @@ def sync():
                 if guid not in plex_episode_guids
             }
             try:
-                account_id_env = os.environ.get("PLEX_ACCOUNT_ID")
-                account_id = int(account_id_env) if account_id_env else None
-                update_plex(plex, missing_movies, missing_episodes, account_id)
+                update_plex(plex, missing_movies, missing_episodes)
             except Exception as exc:
                 logger.error("Failed updating Plex history: %s", exc)
 
@@ -1605,9 +1599,7 @@ def sync():
                 for e in episodes_to_add_plex
             }
             if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
-                account_id_env = os.environ.get("PLEX_ACCOUNT_ID")
-                account_id = int(account_id_env) if account_id_env else None
-                update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt, account_id)
+                update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
 
             if current_activity:
                 save_last_sync_date(current_activity)
@@ -1946,17 +1938,17 @@ def plex_select_user():
     user_id = request.form.get("user_id")
     try:
         if user_id == "account":
+            sub = plex_account
             user_name = plex_account.username or "admin"
-            account_id = plex_account.id
         else:
             user_obj = next(u for u in plex_account.users() if str(u.id) == user_id)
+            sub = plex_account.switchHomeUser(user_obj)
             user_name = user_obj.title
-            account_id = user_obj.id
 
         baseurl = os.environ.get("PLEX_BASEURL", "").rstrip("/")
         parsed = urlparse(baseurl)
         server_resource = None
-        for res in plex_account.resources():
+        for res in sub.resources():
             if "server" not in res.provides:
                 continue
             for conn in res.connections:
@@ -1973,13 +1965,12 @@ def plex_select_user():
             plex = server_resource.connect()
             token = plex._token
         else:
-            token = plex_account.authenticationToken
+            token = sub.authenticationToken
             plex = PlexServer(baseurl, token)
 
         os.environ["PLEX_TOKEN"] = token
         os.environ["PLEX_USER"] = user_name
-        os.environ["PLEX_ACCOUNT_ID"] = str(account_id)
-        save_plex_token(token, user_name, account_id)
+        save_plex_token(token, user_name)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed selecting Plex user: %s", exc)
         users = [{"id": "account", "title": plex_account.username or "Admin"}]
@@ -2004,7 +1995,6 @@ def plex_logout():
     plex_account = None
     os.environ.pop("PLEX_TOKEN", None)
     os.environ.pop("PLEX_USER", None)
-    os.environ.pop("PLEX_ACCOUNT_ID", None)
     if os.path.exists(PLEX_TOKEN_FILE):
         try:
             os.remove(PLEX_TOKEN_FILE)
