@@ -29,6 +29,7 @@ from flask import send_file
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
 
 from utils import (
@@ -209,6 +210,18 @@ def get_plex_server():
             logger.error("Failed to connect to Plex: %s", exc)
             plex = None
     return plex
+
+
+def get_plex_account() -> Optional[MyPlexAccount]:
+    """Return a logged in :class:`MyPlexAccount` or ``None``."""
+    token = os.environ.get("PLEX_TOKEN")
+    if not token:
+        return None
+    try:
+        return MyPlexAccount(token=token)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to authenticate with Plex: %s", exc)
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -2083,14 +2096,8 @@ def restore_backup_route():
 @app.route("/users")
 def users_page():
     """Display Plex users and optional play history counts."""
-    plex_server = get_plex_server()
-    if plex_server is None:
-        return redirect(url_for("config_page"))
-
-    try:
-        account = plex_server.myPlexAccount()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to retrieve Plex account: %s", exc)
+    account = get_plex_account()
+    if account is None:
         return redirect(url_for("config_page"))
     owner = {
         "id": account.id,
@@ -2119,25 +2126,10 @@ def users_page():
             user_obj = next((u for u in account.users() if u.id == uid), None)
             history = []
             if user_obj is not None:
-                # First try using the admin token with accountID filter
                 try:
-                    plex_server.account()  # verify token
-                    history = plex_server.history(accountID=uid, maxresults=None)
+                    history = user_obj.history(maxresults=None)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "Admin token failed for user %s: %s", uid, exc
-                    )
-                    try:
-                        user_server = plex_server.switchUser(user_obj)
-                        user_server.account()  # verify user token
-                        history = user_server.history(accountID=uid, maxresults=None)
-                    except Exception as exc2:  # noqa: BLE001
-                        logger.error(
-                            "Failed to fetch history with user token for %s: %s",
-                            uid,
-                            exc2,
-                        )
-                        history = []
+                    logger.error("Failed to fetch history for %s: %s", uid, exc)
             movie_ids = {h.ratingKey for h in history if getattr(h, "type", "") == "movie"}
             episode_ids = {h.ratingKey for h in history if getattr(h, "type", "") == "episode"}
             watch_counts = {

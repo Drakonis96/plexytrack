@@ -86,6 +86,25 @@ the application will trigger an immediate sync whenever an event is received.
 4. Copy the value of `X-Plex-Token` from the URL bar – that's your token.
 5. If you need more details, Plex offers instructions at <https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/>.
 
+## Reading Plex user history
+
+Once you have a `PLEX_TOKEN` you can access the global play history for any
+managed user with the `plexapi` library:
+
+```python
+from plexapi.myplex import MyPlexAccount
+import os
+
+token = os.getenv("PLEX_TOKEN")
+account = MyPlexAccount(token=token)
+
+managed = account.user("USERNAME")
+history_items = managed.history(maxresults=None)
+for item in history_items:
+    print(item.title, item.type, item.viewedAt)
+```
+
+
 ## Getting Trakt API credentials
 
 1. Log in to your Trakt account and open <https://trakt.tv/oauth/applications>.
