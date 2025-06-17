@@ -1,0 +1,345 @@
+Client plexapi.client
+classplexapi.client.PlexClient(server=None, data=None, initpath=None, baseurl=None, identifier=None, token=None, connect=True, session=None, timeout=None, parent=None)[source]
+Bases: PlexObject
+
+Main class for interacting with a Plex client. This class can connect directly to the client and control it or proxy commands through your Plex Server. To better understand the Plex client API’s read this page: https://github.com/plexinc/plex-media-player/wiki/Remote-control-API
+
+Parameters
+:
+server (PlexServer) – PlexServer this client is connected to (optional).
+
+data (ElementTree) – Response from PlexServer used to build this object (optional).
+
+initpath (str) – Path used to generate data.
+
+baseurl (str) – HTTP URL to connect directly to this client.
+
+identifier (str) – The resource/machine identifier for the desired client. May be necessary when connecting to a specific proxied client (optional).
+
+token (str) – X-Plex-Token used for authentication (optional).
+
+session (Session) – requests.Session object if you want more control (optional).
+
+timeout (int) – timeout in seconds on initial connect to client (default config.TIMEOUT).
+
+Variables
+:
+TAG (str) – ‘Player’
+
+key (str) – ‘/resources’
+
+device (str) – Best guess on the type of device this is (PS, iPhone, Linux, etc).
+
+deviceClass (str) – Device class (pc, phone, etc).
+
+machineIdentifier (str) – Unique ID for this device.
+
+model (str) – Unknown
+
+platform (str) – Unknown
+
+platformVersion (str) – Description
+
+product (str) – Client Product (Plex for iOS, etc).
+
+protocol (str) – Always seems ot be ‘plex’.
+
+protocolCapabilities (list<str>) – List of client capabilities (navigation, playback, timeline, mirror, playqueues).
+
+protocolVersion (str) – Protocol version (1, future proofing?)
+
+server (PlexServer) – Server this client is connected to.
+
+session (Session) – Session object used for connection.
+
+state (str) – Unknown
+
+title (str) – Name of this client (Johns iPhone, etc).
+
+token (str) – X-Plex-Token used for authentication
+
+vendor (str) – Unknown
+
+version (str) – Device version (4.6.1, etc).
+
+_baseurl (str) – HTTP address of the client.
+
+_token (str) – Token used to access this client.
+
+_session (obj) – Requests session object used to access this client.
+
+_proxyThroughServer (bool) – Set to True after calling proxyThroughServer() (default False).
+
+connect(timeout=None)[source]
+Alias of reload as any subsequent requests to this client will be made directly to the device even if the object attributes were initially populated from a PlexServer.
+
+reload()[source]
+Alias to self.connect().
+
+proxyThroughServer(value=True, server=None)[source]
+Tells this PlexClient instance to proxy all future commands through the PlexServer. Useful if you do not wish to connect directly to the Client device itself.
+
+Parameters
+:
+value (bool) – Enable or disable proxying (optional, default True).
+
+Raises
+:
+Unsupported – Cannot use client proxy with unknown server.
+
+query(path, method=None, headers=None, timeout=None, **kwargs)[source]
+Main method used to handle HTTPS requests to the Plex client. This method helps by encoding the response to utf-8 and parsing the returned XML into and ElementTree object. Returns None if no data exists in the response.
+
+sendCommand(command, proxy=None, **params)[source]
+Convenience wrapper around query() to more easily send simple commands to the client. Returns an ElementTree object containing the response.
+
+Parameters
+:
+command (str) – Command to be sent in for format ‘<controller>/<command>’.
+
+proxy (bool) – Set True to proxy this command through the PlexServer.
+
+**params (dict) – Additional GET parameters to include with the command.
+
+Raises
+:
+Unsupported – When we detect the client doesn’t support this capability.
+
+url(key, includeToken=False)[source]
+Build a URL string with proper token argument. Token will be appended to the URL if either includeToken is True or CONFIG.log.show_secrets is ‘true’.
+
+contextMenu()[source]
+Open the context menu on the client.
+
+goBack()[source]
+Navigate back one position.
+
+goToHome()[source]
+Go directly to the home screen.
+
+goToMusic()[source]
+Go directly to the playing music panel.
+
+moveDown()[source]
+Move selection down a position.
+
+moveLeft()[source]
+Move selection left a position.
+
+moveRight()[source]
+Move selection right a position.
+
+moveUp()[source]
+Move selection up a position.
+
+nextLetter()[source]
+Jump to next letter in the alphabet.
+
+pageDown()[source]
+Move selection down a full page.
+
+pageUp()[source]
+Move selection up a full page.
+
+previousLetter()[source]
+Jump to previous letter in the alphabet.
+
+select()[source]
+Select element at the current position.
+
+toggleOSD()[source]
+Toggle the on screen display during playback.
+
+goToMedia(media, **params)[source]
+Navigate directly to the specified media page.
+
+Parameters
+:
+media (Media) – Media object to navigate to.
+
+**params (dict) – Additional GET parameters to include with the command.
+
+pause(mtype='video')[source]
+Pause the currently playing media type.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+play(mtype='video')[source]
+Start playback for the specified media type.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+refreshPlayQueue(playQueueID, mtype='video')[source]
+Refresh the specified Playqueue.
+
+Parameters
+:
+playQueueID (str) – Playqueue ID.
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+seekTo(offset, mtype='video')[source]
+Seek to the specified offset (ms) during playback.
+
+Parameters
+:
+offset (int) – Position to seek to (milliseconds).
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+skipNext(mtype='video')[source]
+Skip to the next playback item.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+skipPrevious(mtype='video')[source]
+Skip to previous playback item.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+skipTo(key, mtype='video')[source]
+Skip to the playback item with the specified key.
+
+Parameters
+:
+key (str) – Key of the media item to skip to.
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+stepBack(mtype='video')[source]
+Step backward a chunk of time in the current playback item.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+stepForward(mtype='video')[source]
+Step forward a chunk of time in the current playback item.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+stop(mtype='video')[source]
+Stop the currently playing item.
+
+Parameters
+:
+mtype (str) – Media type to take action against (music, photo, video).
+
+setRepeat(repeat, mtype='video')[source]
+Enable repeat for the specified playback items.
+
+Parameters
+:
+repeat (int) – Repeat mode (0=off, 1=repeatone, 2=repeatall).
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+setShuffle(shuffle, mtype='video')[source]
+Enable shuffle for the specified playback items.
+
+Parameters
+:
+shuffle (int) – Shuffle mode (0=off, 1=on)
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+setVolume(volume, mtype='video')[source]
+Enable volume for the current playback item.
+
+Parameters
+:
+volume (int) – Volume level (0-100).
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+setAudioStream(audioStreamID, mtype='video')[source]
+Select the audio stream for the current playback item (only video).
+
+Parameters
+:
+audioStreamID (str) – ID of the audio stream from the media object.
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+setSubtitleStream(subtitleStreamID, mtype='video')[source]
+Select the subtitle stream for the current playback item (only video).
+
+Parameters
+:
+subtitleStreamID (str) – ID of the subtitle stream from the media object.
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+setVideoStream(videoStreamID, mtype='video')[source]
+Select the video stream for the current playback item (only video).
+
+Parameters
+:
+videoStreamID (str) – ID of the video stream from the media object.
+
+mtype (str) – Media type to take action against (music, photo, video).
+
+playMedia(media, offset=0, **params)[source]
+Start playback of the specified media item. See also:
+
+Parameters
+:
+media (Media) – Media item to be played back (movie, music, photo, playlist, playqueue).
+
+offset (int) – Number of milliseconds at which to start playing with zero representing the beginning (default 0).
+
+**params (dict) – Optional additional parameters to include in the playback request. See also: https://github.com/plexinc/plex-media-player/wiki/Remote-control-API#modified-commands
+
+setParameters(volume=None, shuffle=None, repeat=None, mtype='video')[source]
+Set multiple playback parameters at once.
+
+Parameters
+:
+volume (int) – Volume level (0-100; optional).
+
+shuffle (int) – Shuffle mode (0=off, 1=on; optional).
+
+repeat (int) – Repeat mode (0=off, 1=repeatone, 2=repeatall; optional).
+
+mtype (str) – Media type to take action against (optional music, photo, video).
+
+setStreams(audioStreamID=None, subtitleStreamID=None, videoStreamID=None, mtype='video')[source]
+Select multiple playback streams at once.
+
+Parameters
+:
+audioStreamID (str) – ID of the audio stream from the media object.
+
+subtitleStreamID (str) – ID of the subtitle stream from the media object.
+
+videoStreamID (str) – ID of the video stream from the media object.
+
+mtype (str) – Media type to take action against (optional music, photo, video).
+
+timelines(wait=0)[source]
+Poll the client’s timelines, create, and return timeline objects. Some clients may not always respond to timeline requests, believe this to be a Plex bug.
+
+propertytimeline
+Returns the active timeline object.
+
+isPlayingMedia(includePaused=True)[source]
+Returns True if any media is currently playing.
+
+Parameters
+:
+includePaused (bool) – Set True to treat currently paused items as playing (optional; default True).
+
+classplexapi.client.ClientTimeline(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Get the timeline’s attributes.

@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Dict, Optional, Set, Tuple
 
 from utils import (
@@ -14,109 +15,651 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 
-def get_plex_history(plex) -> Tuple[
+def get_owner_watch_counts(account) -> Dict[str, int]:
+    """
+    Get watch counts for the owner using MyPlexAccount.
+    
+    Args:
+        account: MyPlexAccount instance
+    
+    Returns:
+        Dict with movies, episodes, and total counts
+    """
+    movies, episodes = get_owner_plex_history(account)
+    return {
+        "movies": len(movies),
+        "episodes": len(episodes),
+        "total": len(movies) + len(episodes),
+    }
+
+
+def get_managed_user_watch_counts(account, user_id) -> Dict[str, int]:
+    """
+    Get watch counts for a managed user using the new schema.
+    
+    Args:
+        account: MyPlexAccount instance
+        user_id: User ID of the managed user
+    
+    Returns:
+        Dict with movies, episodes, and total counts
+    """
+    movies, episodes = get_managed_user_plex_history(account, user_id)
+    return {
+        "movies": len(movies),
+        "episodes": len(episodes),
+        "total": len(movies) + len(episodes),
+    }
+
+
+def get_owner_plex_history(account) -> Tuple[
     Dict[str, Dict[str, Optional[str]]],
     Dict[str, Dict[str, Optional[str]]],
 ]:
-    """Return watched movies and episodes from Plex keyed by GUID."""
+    """
+    Return watched movies and episodes from Plex for the owner using MyPlexAccount.
+    Follows the new schema: account.history()
+    
+    Args:
+        account: MyPlexAccount instance
+    
+    Returns:
+        Tuple of (movies_dict, episodes_dict) keyed by GUID
+    """
     movies: Dict[str, Dict[str, Optional[str]]] = {}
     episodes: Dict[str, Dict[str, Optional[str]]] = {}
     show_guid_cache: Dict[str, Optional[str]] = {}
 
-    logger.info("Fetching Plex history…")
-    for entry in plex.history():
-        watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+    logger.info("Fetching owner history using MyPlexAccount...")
+    
+    try:
+        # Get global history for the owner
+        history_items = account.history(maxresults=None, mindate=None)
+        
+        for entry in history_items:
+            watched_at = to_iso_z(getattr(entry, "viewedAt", None))
 
-        if entry.type == "movie":
-            try:
-                item = entry.source() or plex.fetchItem(entry.ratingKey)
-            except Exception as exc:
-                logger.debug("Failed to fetch movie %s from Plex: %s", entry.ratingKey, exc)
-                continue
-            title = item.title
-            year = normalize_year(getattr(item, "year", None))
-            guid = imdb_guid(item)
-            if not guid:
-                continue
-            if guid not in movies:
-                movies[guid] = {
-                    "title": title,
-                    "year": year,
-                    "watched_at": watched_at,
-                    "guid": guid,
-                }
-        elif entry.type == "episode":
-            season = getattr(entry, "parentIndex", None)
-            number = getattr(entry, "index", None)
-            show = getattr(entry, "grandparentTitle", None)
-            try:
-                item = entry.source() or plex.fetchItem(entry.ratingKey)
-            except Exception as exc:
-                logger.debug("Failed to fetch episode %s from Plex: %s", entry.ratingKey, exc)
-                item = None
-            if item:
-                season = season or item.seasonNumber
-                number = number or item.index
-                show = show or item.grandparentTitle
-                guid = imdb_guid(item)
-            else:
-                guid = None
-            if None in (season, number, show):
-                continue
-            code = f"S{int(season):02d}E{int(number):02d}"
-
-            series_guid: Optional[str] = None
-            if item is not None:
-                gp_guid_raw = getattr(item, "grandparentGuid", None)
-                if gp_guid_raw:
-                    series_guid = _parse_guid_value(gp_guid_raw)
-            if series_guid is None and show in show_guid_cache:
-                series_guid = show_guid_cache[show]
-            if series_guid is None and show:
-                series_obj = get_show_from_library(plex, show)
-                series_guid = imdb_guid(series_obj) if series_obj else None
-                show_guid_cache[show] = series_guid
-
-            # Only store episodes with individual episode GUIDs (like previous version)
-            if guid and valid_guid(guid) and guid not in episodes:
-                episodes[guid] = {
-                    "show": show,
-                    "code": code,
-                    "watched_at": watched_at,
-                    "guid": guid,
-                }
-
-    logger.info("Fetching watched flags from Plex library…")
-    for section in plex.library.sections():
-        try:
-            if section.type == "movie":
-                for item in section.search(viewCount__gt=0):
+            if entry.type == "movie":
+                try:
+                    item = entry.source() if hasattr(entry, 'source') else None
+                    if not item:
+                        continue
                     title = item.title
                     year = normalize_year(getattr(item, "year", None))
                     guid = imdb_guid(item)
-                    if guid and guid not in movies:
+                    if not guid:
+                        continue
+                    if guid not in movies:
                         movies[guid] = {
                             "title": title,
                             "year": year,
-                            "watched_at": to_iso_z(getattr(item, "lastViewedAt", None)),
+                            "watched_at": watched_at,
                             "guid": guid,
                         }
-            elif section.type == "show":
-                for ep in section.searchEpisodes(viewCount__gt=0):
-                    code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
-                    guid = imdb_guid(ep)
-                    show_title = getattr(ep, "grandparentTitle", None)
-                    # Only store episodes with individual episode GUIDs (like previous version)
-                    if guid and guid not in episodes:
-                        episodes[guid] = {
-                            "show": show_title,
-                            "code": code,
-                            "watched_at": to_iso_z(getattr(ep, "lastViewedAt", None)),
-                            "guid": guid,
-                        }
-        except Exception as exc:
-            logger.debug("Failed fetching watched items from section %s: %s", section.title, exc)
+                except Exception as exc:
+                    logger.debug("Failed to fetch movie from owner history: %s", exc)
+                    continue
+                    
+            elif entry.type == "episode":
+                try:
+                    season = getattr(entry, "parentIndex", None)
+                    number = getattr(entry, "index", None)
+                    show = getattr(entry, "grandparentTitle", None)
+                    
+                    item = entry.source() if hasattr(entry, 'source') else None
+                    if item:
+                        season = season or getattr(item, 'seasonNumber', None)
+                        number = number or getattr(item, 'index', None)
+                        show = show or getattr(item, 'grandparentTitle', None)
+                        guid = imdb_guid(item)
+                    else:
+                        guid = None
+                        
+                    if None in (season, number, show):
+                        continue
+                    code = f"S{int(season):02d}E{int(number):02d}"
 
+                    # Only store episodes with individual episode GUIDs
+                    if guid and valid_guid(guid) and guid not in episodes:
+                        episodes[guid] = {
+                            "show": show,
+                            "code": code,
+                            "watched_at": watched_at,
+                            "guid": guid,
+                        }
+                except Exception as exc:
+                    logger.debug("Failed to fetch episode from owner history: %s", exc)
+                    continue
+
+    except Exception as exc:
+        logger.error("Failed to fetch owner history: %s", exc)
+
+    # Escanear elementos marcados manualmente como vistos (viewCount > 0)
+    logger.info("Scanning for manually marked watched items for owner...")
+    try:
+        # Obtener el servidor principal del owner
+        server_name = os.environ.get("PLEX_SERVER_NAME")
+        plex_server = None
+        if server_name:
+            try:
+                plex_server = account.server(server_name)
+                logger.debug("Successfully got server %s for owner", server_name)
+            except Exception as exc:
+                logger.warning("Failed to get specific server %s for owner: %s", server_name, exc)
+        if not plex_server:
+            try:
+                resources = account.resources()
+                for resource in resources:
+                    if resource.provides and "server" in resource.provides:
+                        plex_server = resource.connect()
+                        logger.info("Using first available server: %s", plex_server.friendlyName)
+                        break
+            except Exception as exc:
+                logger.warning("Failed to get any server for owner: %s", exc)
+        if plex_server:
+            for section in plex_server.library.sections():
+                logger.debug("Processing section: %s (type: %s)", section.title, section.type)
+                if section.type == "movie":
+                    try:
+                        watched_movies = section.search(viewCount__gt=0)
+                        logger.debug("Found %d watched movies in section %s", len(watched_movies), section.title)
+                        for movie in watched_movies:
+                            try:
+                                guid = imdb_guid(movie)
+                                title = movie.title
+                                year = normalize_year(getattr(movie, "year", None))
+                                if not guid or guid in movies:
+                                    continue
+                                # Buscar si hay historial para este ítem
+                                user_history_for_movie = list(plex_server.history(ratingKey=movie.ratingKey, maxresults=1))
+                                if user_history_for_movie:
+                                    last_viewed = user_history_for_movie[0]
+                                    watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
+                                else:
+                                    watched_at = to_iso_z(None)
+                                movies[guid] = {
+                                    "title": title,
+                                    "year": year,
+                                    "watched_at": watched_at,
+                                    "guid": guid,
+                                }
+                                logger.debug("Added manually marked - Movie: %s (%s)", title, year)
+                            except Exception as exc:
+                                logger.debug("Failed to check movie %s for owner: %s", movie.ratingKey, exc)
+                    except Exception as exc:
+                        logger.warning("Failed to process movie section %s: %s", section.title, exc)
+                elif section.type == "show":
+                    try:
+                        watched_episodes = section.searchEpisodes(viewCount__gt=0)
+                        logger.debug("Found %d watched episodes in section %s", len(watched_episodes), section.title)
+                        for episode in watched_episodes:
+                            try:
+                                guid = imdb_guid(episode)
+                                season_num = getattr(episode, 'seasonNumber', None)
+                                episode_num = getattr(episode, 'episodeNumber', None)
+                                show_title = getattr(episode, 'grandparentTitle', None)
+                                if None in (season_num, episode_num, show_title):
+                                    continue
+                                code = f"S{int(season_num):02d}E{int(episode_num):02d}"
+                                if not guid or not valid_guid(guid) or guid in episodes:
+                                    continue
+                                user_history_for_ep = list(plex_server.history(ratingKey=episode.ratingKey, maxresults=1))
+                                if user_history_for_ep:
+                                    last_viewed = user_history_for_ep[0]
+                                    watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
+                                else:
+                                    watched_at = to_iso_z(None)
+                                episodes[guid] = {
+                                    "show": show_title,
+                                    "code": code,
+                                    "watched_at": watched_at,
+                                    "guid": guid,
+                                }
+                                logger.debug("Added manually marked - Episode: %s %s", show_title, code)
+                            except Exception as exc:
+                                logger.debug("Failed to check episode %s for owner: %s", episode.ratingKey, exc)
+                    except Exception as exc:
+                        logger.warning("Failed to process show section %s: %s", section.title, exc)
+    except Exception as exc:
+        logger.error("Failed to scan libraries for owner: %s", exc)
+
+    logger.info("Owner history: %d movies and %d episodes", len(movies), len(episodes))
+    return movies, episodes
+
+
+def get_managed_user_plex_history(account, user_id, server_name=None) -> Tuple[
+    Dict[str, Dict[str, Optional[str]]],
+    Dict[str, Dict[str, Optional[str]]],
+]:
+    """
+    Return watched movies and episodes from Plex for a managed user.
+    Uses the owner's credentials and filters by accountID as managed users
+    cannot access their own history directly due to Plex permission model.
+    
+    IMPORTANT: This function uses the OWNER'S account credentials to fetch
+    managed user history by filtering with accountID. This is the correct
+    approach as per Plex API documentation - managed users don't have
+    permission to access their own history directly.
+    
+    Args:
+        account: MyPlexAccount instance (owner account)
+        user_id: User ID of the managed user
+        server_name: Name of the Plex server (optional)
+    
+    Returns:
+        Tuple of (movies_dict, episodes_dict) keyed by GUID
+    """
+    movies: Dict[str, Dict[str, Optional[str]]] = {}
+    episodes: Dict[str, Dict[str, Optional[str]]] = {}
+
+    logger.info("Fetching history for managed user ID: %s using owner credentials", user_id)
+    
+    try:
+        # Find the managed user by ID to verify they exist
+        managed_user = None
+        for user in account.users():
+            if user.id == user_id and hasattr(user, 'home') and user.home:
+                managed_user = user
+                break
+        
+        if not managed_user:
+            logger.error("Managed user with ID %s not found", user_id)
+            return movies, episodes
+        
+        logger.info("Found managed user: %s", managed_user.username or managed_user.title)
+        
+        # Get owner's server connection (owner has permissions to access all user data)
+        plex_server = None
+        server_name = server_name or os.environ.get("PLEX_SERVER_NAME")
+        logger.debug("PLEX_SERVER_NAME environment variable: %s", server_name)
+        
+        if server_name:
+            try:
+                plex_server = account.resource(server_name).connect()
+                logger.debug("Successfully connected to server %s using owner credentials", server_name)
+            except Exception as exc:
+                logger.warning("Failed to connect to specific server %s: %s", server_name, exc)
+        
+        if not plex_server:
+            try:
+                resources = account.resources()
+                for resource in resources:
+                    if resource.provides and "server" in resource.provides:
+                        plex_server = resource.connect()
+                        logger.info("Using first available server: %s", plex_server.friendlyName)
+                        break
+            except Exception as exc:
+                logger.warning("Failed to connect to any server: %s", exc)
+        
+        if not plex_server:
+            logger.error("No Plex server available for owner account")
+            return movies, episodes
+        
+        # Method 1: Get global history filtered by accountID (most reliable)
+        try:
+            logger.debug("Fetching global history filtered by accountID %s", user_id)
+            # Use owner's server to get history filtered by managed user's accountID
+            history_items = plex_server.history(accountID=user_id, maxresults=None)
+            
+            for entry in history_items:
+                watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+                
+                if entry.type == "movie":
+                    try:
+                        item = entry.source() if hasattr(entry, 'source') else None
+                        if not item:
+                            continue
+                        title = item.title
+                        year = normalize_year(getattr(item, "year", None))
+                        guid = imdb_guid(item)
+                        if not guid:
+                            continue
+                        if guid not in movies:
+                            movies[guid] = {
+                                "title": title,
+                                "year": year,
+                                "watched_at": watched_at,
+                                "guid": guid,
+                            }
+                            logger.debug("Added from global history - Movie: %s (%s)", title, year)
+                    except Exception as exc:
+                        logger.debug("Failed to process movie from global history: %s", exc)
+                        continue
+                        
+                elif entry.type == "episode":
+                    try:
+                        season = getattr(entry, "parentIndex", None)
+                        number = getattr(entry, "index", None)
+                        show = getattr(entry, "grandparentTitle", None)
+                        
+                        item = entry.source() if hasattr(entry, 'source') else None
+                        if item:
+                            season = season or getattr(item, 'seasonNumber', None)
+                            number = number or getattr(item, 'index', None)
+                            show = show or getattr(item, 'grandparentTitle', None)
+                            guid = imdb_guid(item)
+                        else:
+                            guid = None
+                            
+                        if None in (season, number, show):
+                            continue
+                        code = f"S{int(season):02d}E{int(number):02d}"
+                        
+                        if guid and valid_guid(guid) and guid not in episodes:
+                            episodes[guid] = {
+                                "show": show,
+                                "code": code,
+                                "watched_at": watched_at,
+                                "guid": guid,
+                            }
+                            logger.debug("Added from global history - Episode: %s %s", show, code)
+                    except Exception as exc:
+                        logger.debug("Failed to process episode from global history: %s", exc)
+                        continue
+                        
+        except Exception as exc:
+            logger.warning("Failed to get global history for managed user %s: %s", user_id, exc)
+        
+        # Method 2: Scan library sections for manually marked items (viewCount > 0) 
+        # and verify they have history entries for this specific user
+        try:
+            logger.debug("Scanning library sections for manually marked items for user %s", user_id)
+            
+            for section in plex_server.library.sections():
+                logger.debug("Processing section: %s (type: %s)", section.title, section.type)
+                
+                if section.type == "movie":
+                    try:
+                        # Get all movies marked as watched (viewCount > 0)
+                        watched_movies = section.search(viewCount__gt=0)
+                        logger.debug("Found %d watched movies in section %s", len(watched_movies), section.title)
+                        
+                        for movie in watched_movies:
+                            try:
+                                # Check if this specific user has history for this movie
+                                user_history_for_movie = list(plex_server.history(ratingKey=movie.ratingKey, accountID=user_id, maxresults=1))
+                                
+                                if user_history_for_movie:
+                                    title = movie.title
+                                    year = normalize_year(getattr(movie, "year", None))
+                                    guid = imdb_guid(movie)
+                                    
+                                    if not guid or guid in movies:
+                                        continue
+                                    
+                                    last_viewed = user_history_for_movie[0]
+                                    watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
+                                    
+                                    movies[guid] = {
+                                        "title": title,
+                                        "year": year,
+                                        "watched_at": watched_at,
+                                        "guid": guid,
+                                    }
+                                    logger.debug("Added from section scan - Movie: %s (%s)", title, year)
+                                    
+                            except Exception as exc:
+                                logger.debug("Failed to check movie %s for user %s: %s", movie.ratingKey, user_id, exc)
+                                
+                    except Exception as exc:
+                        logger.warning("Failed to process movie section %s: %s", section.title, exc)
+                        
+                elif section.type == "show":
+                    try:
+                        # Get all episodes marked as watched (viewCount > 0)
+                        watched_episodes = section.searchEpisodes(viewCount__gt=0)
+                        logger.debug("Found %d watched episodes in section %s", len(watched_episodes), section.title)
+                        
+                        for episode in watched_episodes:
+                            try:
+                                # Check if this specific user has history for this episode
+                                user_history_for_ep = list(plex_server.history(ratingKey=episode.ratingKey, accountID=user_id, maxresults=1))
+                                
+                                if user_history_for_ep:
+                                    season_num = getattr(episode, 'seasonNumber', None)
+                                    episode_num = getattr(episode, 'episodeNumber', None)
+                                    show_title = getattr(episode, 'grandparentTitle', None)
+                                    
+                                    if None in (season_num, episode_num, show_title):
+                                        continue
+                                        
+                                    code = f"S{int(season_num):02d}E{int(episode_num):02d}"
+                                    guid = imdb_guid(episode)
+                                    
+                                    if not guid or not valid_guid(guid) or guid in episodes:
+                                        continue
+                                    
+                                    last_viewed = user_history_for_ep[0]
+                                    watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
+                                    
+                                    episodes[guid] = {
+                                        "show": show_title,
+                                        "code": code,
+                                        "watched_at": watched_at,
+                                        "guid": guid,
+                                    }
+                                    logger.debug("Added from section scan - Episode: %s %s", show_title, code)
+                                    
+                            except Exception as exc:
+                                logger.debug("Failed to check episode %s for user %s: %s", episode.ratingKey, user_id, exc)
+                                
+                    except Exception as exc:
+                        logger.warning("Failed to process show section %s: %s", section.title, exc)
+                        
+        except Exception as exc:
+            logger.error("Failed to scan libraries for managed user %s: %s", user_id, exc)
+            
+    except Exception as exc:
+        logger.error("Failed to fetch managed user history: %s", exc)
+        
+    logger.info("Managed user %s history: %d movies and %d episodes", user_id, len(movies), len(episodes))
+    
+    if len(movies) == 0 and len(episodes) == 0:
+        logger.warning("No content found for managed user %s - this might indicate a configuration issue", user_id)
+        logger.warning("Recommendations:")
+        logger.warning("1. Check if PLEX_SERVER_NAME environment variable is set correctly")
+        logger.warning("2. Verify that the managed user has access to the server")
+        logger.warning("3. Ensure the user has watched or marked content as watched")
+        logger.warning("4. Check Plex server connectivity")
+        logger.warning("5. Verify the owner account has proper access to the managed user's data")
+        logger.warning("6. Confirm the managed user ID (%s) is correct", user_id)
+        logger.warning("7. Check if the user has actually watched content (not just added to library)")
+    else:
+        logger.info("Successfully retrieved content for managed user %s", user_id)
+        
+    return movies, episodes
+
+
+def get_plex_history(plex) -> Tuple[
+    Dict[str, Dict[str, Optional[str]]],
+    Dict[str, Dict[str, Optional[str]]],
+]:
+    """
+    Legacy function for backward compatibility.
+    Now redirects to get_owner_plex_history using the global account.
+    Falls back to original server-based method if no account available.
+    """
+    from app import get_plex_account
+    
+    account = get_plex_account()
+    if account is not None:
+        # Use new schema with MyPlexAccount
+        return get_owner_plex_history(account)
+    else:
+        # Fallback to legacy server-based method (when using token)
+        logger.warning("No Plex account available, using legacy server-based history")
+        return get_server_based_history(plex)
+
+
+def get_user_plex_history(plex, user_id=None) -> Tuple[
+    Dict[str, Dict[str, Optional[str]]],
+    Dict[str, Dict[str, Optional[str]]],
+]:
+    """
+    Legacy function for backward compatibility.
+    Now redirects to new schema functions.
+    """
+    from app import get_plex_account
+    
+    account = get_plex_account()
+    if account is not None:
+        # Use new schema with MyPlexAccount
+        if user_id is None:
+            # For owner, use owner history
+            return get_owner_plex_history(account)
+        else:
+            # For managed users, use managed user history
+            return get_managed_user_plex_history(account, user_id)
+    else:
+        # Fallback to legacy server-based method (when using token)
+        logger.warning("No Plex account available, using legacy server-based history for user %s", user_id)
+        if user_id is None:
+            return get_server_based_history(plex)
+        else:
+            # For legacy token method, we can't access user-specific history easily
+            logger.error("Cannot access user-specific history with legacy token method")
+            return {}, {}
+
+
+def get_user_watch_counts(plex, user_id=None) -> Dict[str, int]:
+    """
+    Legacy function for backward compatibility.
+    Get simplified watch counts for a user using the new schema.
+    """
+    from app import get_plex_account
+    
+    account = get_plex_account()
+    if account is not None:
+        if user_id is None:
+            return get_owner_watch_counts(account)
+        else:
+            return get_managed_user_watch_counts(account, user_id)
+    else:
+        # Fallback to legacy method
+        movies, episodes = get_server_based_history(plex)
+        return {
+            "movies": len(movies),
+            "episodes": len(episodes),
+            "total": len(movies) + len(episodes),
+        }
+
+
+def get_server_based_history(plex) -> Tuple[
+    Dict[str, Dict[str, Optional[str]]],
+    Dict[str, Dict[str, Optional[str]]],
+]:
+    """
+    Fallback method using direct server access (legacy token method).
+    This is the original implementation that works with PlexServer tokens.
+    """
+    movies: Dict[str, Dict[str, Optional[str]]] = {}
+    episodes: Dict[str, Dict[str, Optional[str]]] = {}
+    show_guid_cache: Dict[str, Optional[str]] = {}
+
+    logger.info("Fetching Plex history using server-based method...")
+    try:
+        for entry in plex.history():
+            watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+
+            if entry.type == "movie":
+                try:
+                    item = entry.source() or plex.fetchItem(entry.ratingKey)
+                    title = item.title
+                    year = normalize_year(getattr(item, "year", None))
+                    guid = imdb_guid(item)
+                    if not guid:
+                        continue
+                    if guid not in movies:
+                        movies[guid] = {
+                            "title": title,
+                            "year": year,
+                            "watched_at": watched_at,
+                            "guid": guid,
+                        }
+                except Exception as exc:
+                    logger.debug("Failed to fetch movie %s from Plex: %s", entry.ratingKey, exc)
+                    continue
+                    
+            elif entry.type == "episode":
+                try:
+                    season = getattr(entry, "parentIndex", None)
+                    number = getattr(entry, "index", None)
+                    show = getattr(entry, "grandparentTitle", None)
+                    
+                    item = entry.source() or plex.fetchItem(entry.ratingKey)
+                    if item:
+                        season = season or item.seasonNumber
+                        number = number or item.index
+                        show = show or item.grandparentTitle
+                        guid = imdb_guid(item)
+                    else:
+                        guid = None
+                        
+                    if None in (season, number, show):
+                        continue
+                    code = f"S{int(season):02d}E{int(number):02d}"
+
+                    # Cache show GUID
+                    series_guid: Optional[str] = None
+                    if item is not None:
+                        gp_guid_raw = getattr(item, "grandparentGuid", None)
+                        if gp_guid_raw:
+                            series_guid = _parse_guid_value(gp_guid_raw)
+                    if series_guid is None and show in show_guid_cache:
+                        series_guid = show_guid_cache[show]
+                    if series_guid is None and show:
+                        series_obj = get_show_from_library(plex, show)
+                        series_guid = imdb_guid(series_obj) if series_obj else None
+                        show_guid_cache[show] = series_guid
+
+                    # Only store episodes with individual episode GUIDs
+                    if guid and valid_guid(guid) and guid not in episodes:
+                        episodes[guid] = {
+                            "show": show,
+                            "code": code,
+                            "watched_at": watched_at,
+                            "guid": guid,
+                        }
+                except Exception as exc:
+                    logger.debug("Failed to fetch episode %s from Plex: %s", entry.ratingKey, exc)
+                    continue
+
+        # Also check library for watched flags
+        logger.info("Fetching watched flags from Plex library…")
+        for section in plex.library.sections():
+            try:
+                if section.type == "movie":
+                    for item in section.search(viewCount__gt=0):
+                        title = item.title
+                        year = normalize_year(getattr(item, "year", None))
+                        guid = imdb_guid(item)
+                        if guid and guid not in movies:
+                            movies[guid] = {
+                                "title": title,
+                                "year": year,
+                                "watched_at": to_iso_z(getattr(item, "lastViewedAt", None)),
+                                "guid": guid,
+                            }
+                elif section.type == "show":
+                    for ep in section.searchEpisodes(viewCount__gt=0):
+                        code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
+                        guid = imdb_guid(ep)
+                        show_title = getattr(ep, "grandparentTitle", None)
+                        # Only store episodes with individual episode GUIDs
+                        if guid and guid not in episodes:
+                            episodes[guid] = {
+                                "show": show_title,
+                                "code": code,
+                                "watched_at": to_iso_z(getattr(ep, "lastViewedAt", None)),
+                                "guid": guid,
+                            }
+            except Exception as exc:
+                logger.debug("Failed fetching watched items from section %s: %s", section.title, exc)
+
+    except Exception as exc:
+        logger.error("Failed to fetch server-based history: %s", exc)
+
+    logger.info("Server-based history: %d movies and %d episodes", len(movies), len(episodes))
     return movies, episodes
 
 
@@ -218,3 +761,256 @@ def update_plex(
         logger.info("Marked %d movies and %d episodes as watched in Plex", movie_count, episode_count)
     else:
         logger.info("Nothing new to send to Plex.")
+
+def get_user_plex_history(plex, user_id=None) -> Tuple[
+    Dict[str, Dict[str, Optional[str]]],
+    Dict[str, Dict[str, Optional[str]]],
+]:
+    """
+    Return watched movies and episodes from Plex for a specific user.
+    For managed users, captures both naturally watched content and manually marked as watched.
+    
+    Args:
+        plex: PlexServer instance (with admin token)
+        user_id: User ID for accountID parameter. If None, gets history for current user (owner)
+    
+    Returns:
+        Tuple of (movies_dict, episodes_dict) keyed by GUID
+    """
+    movies: Dict[str, Dict[str, Optional[str]]] = {}
+    episodes: Dict[str, Dict[str, Optional[str]]] = {}
+    show_guid_cache: Dict[str, Optional[str]] = {}
+
+    if user_id is None:
+        # For owner, use the standard get_plex_history approach
+        logger.info("Fetching history for owner using standard method")
+        return get_plex_history(plex)
+    
+    logger.info("Fetching history for managed user ID: %s", user_id)
+    
+    # For managed users, we'll use a comprehensive approach that captures:
+    # 1. Items from watch history (naturally watched)
+    # 2. Items manually marked as watched by the user
+    # 3. Items with viewCount > 0 that belong to this user
+    
+    # Strategy 1: Get history entries using accountID (naturally watched content)
+    logger.info("Fetching natural watch history for user %s...", user_id)
+    try:
+        history_entries = plex.history(accountID=user_id)
+        
+        for entry in history_entries:
+            watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+
+            if entry.type == "movie":
+                try:
+                    item = entry.source() or plex.fetchItem(entry.ratingKey)
+                    title = item.title
+                    year = normalize_year(getattr(item, "year", None))
+                    guid = imdb_guid(item)
+                    if guid and guid not in movies:
+                        movies[guid] = {
+                            "title": title,
+                            "year": year,
+                            "watched_at": watched_at,
+                            "guid": guid,
+                        }
+                        logger.debug("Added from history - Movie: %s (%s)", title, year)
+                except Exception as exc:
+                    logger.debug("Failed to fetch movie %s from history: %s", entry.ratingKey, exc)
+                    
+            elif entry.type == "episode":
+                try:
+                    season = getattr(entry, "parentIndex", None)
+                    number = getattr(entry, "index", None)
+                    show = getattr(entry, "grandparentTitle", None)
+                    
+                    item = entry.source() or plex.fetchItem(entry.ratingKey)
+                    if item:
+                        season = season or item.seasonNumber
+                        number = number or item.index
+                        show = show or item.grandparentTitle
+                        guid = imdb_guid(item)
+                        
+                        if None not in (season, number, show) and guid and valid_guid(guid):
+                            code = f"S{int(season):02d}E{int(number):02d}"
+                            
+                            # Cache show GUID
+                            if show not in show_guid_cache:
+                                series_obj = get_show_from_library(plex, show)
+                                show_guid_cache[show] = imdb_guid(series_obj) if series_obj else None
+                            
+                            if guid not in episodes:
+                                episodes[guid] = {
+                                    "show": show,
+                                    "code": code,
+                                    "watched_at": watched_at,
+                                    "guid": guid,
+                                }
+                                logger.debug("Added from history - Episode: %s %s", show, code)
+                except Exception as exc:
+                    logger.debug("Failed to fetch episode %s from history: %s", entry.ratingKey, exc)
+                    
+        logger.info("From history: %d movies and %d episodes for user %s", len(movies), len(episodes), user_id)
+        
+    except Exception as exc:
+        logger.warning("Failed to fetch history for user %s: %s", user_id, exc)
+
+    # Strategy 2: Scan all watched items and check if this user marked them as watched
+    # This captures manually marked items that might not appear in history
+    logger.info("Scanning for manually marked watched items for user %s...", user_id)
+    
+    try:
+        for section in plex.library.sections():
+            logger.debug("Processing section: %s (type: %s)", section.title, section.type)
+            
+            if section.type == "movie":
+                try:
+                    # Get all movies that have been watched by anyone
+                    watched_movies = section.search(viewCount__gt=0)
+                    logger.debug("Found %d watched movies in section %s", len(watched_movies), section.title)
+                    
+                    for movie in watched_movies:
+                        try:
+                            # Check if this specific user has watched this movie
+                            # This includes both natural watching and manual marking
+                            user_history_for_movie = list(plex.history(ratingKey=movie.ratingKey, accountID=user_id, maxresults=1))
+                            
+                            title = movie.title
+                            year = normalize_year(getattr(movie, "year", None))
+                            guid = imdb_guid(movie)
+                            
+                            if not guid:
+                                continue
+                                
+                            if guid in movies:
+                                continue
+                            
+                            if user_history_for_movie:  
+                                # User has this movie in their natural viewing history
+                                last_viewed = user_history_for_movie[0]
+                                watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
+                                movies[guid] = {
+                                    "title": title,
+                                    "year": year,
+                                    "watched_at": watched_at,
+                                    "guid": guid,
+                                }
+                                logger.debug("Added from history - Movie: %s (%s)", title, year)
+                            else:
+                                # No history entry, but movie has viewCount > 0
+                                # This could be a manually marked movie
+                                # Check if the user can access this movie (shared library check)
+                                try:
+                                    # Try to get the movie using the user's perspective if possible
+                                    # For now, include it with current timestamp as fallback
+                                    # This captures manually marked items
+                                    watched_at = to_iso_z(None)  # Use current time as fallback
+                                    movies[guid] = {
+                                        "title": title,
+                                        "year": year,
+                                        "watched_at": watched_at,
+                                        "guid": guid,
+                                    }
+                                    logger.debug("Added manually marked - Movie: %s (%s)", title, year)
+                                except Exception as exc:
+                                    logger.debug("Failed to verify access for movie %s: %s", title, exc)
+                        except Exception as exc:
+                            logger.debug("Failed to check movie %s for user %s: %s", movie.ratingKey, user_id, exc)
+                            
+                except Exception as exc:
+                    logger.warning("Failed to process movie section %s: %s", section.title, exc)
+                    
+            elif section.type == "show":
+                try:
+                    # For shows, we need to check individual episodes
+                    # Get all episodes that have been watched by anyone
+                    watched_episodes = section.searchEpisodes(viewCount__gt=0)
+                    logger.debug("Found %d watched episodes in section %s", len(watched_episodes), section.title)
+                    
+                    for episode in watched_episodes:
+                        try:
+                            # Check if this specific user has watched this episode
+                            user_history_for_ep = list(plex.history(ratingKey=episode.ratingKey, accountID=user_id, maxresults=1))
+                            
+                            season_num = getattr(episode, 'seasonNumber', None)
+                            episode_num = getattr(episode, 'episodeNumber', None)
+                            show_title = getattr(episode, 'grandparentTitle', None)
+                            
+                            if None in (season_num, episode_num, show_title):
+                                continue
+                                
+                            code = f"S{int(season_num):02d}E{int(episode_num):02d}"
+                            guid = imdb_guid(episode)
+                            
+                            if not guid or not valid_guid(guid) or guid in episodes:
+                                continue
+                            
+                            if user_history_for_ep:  
+                                # User has this episode in their natural viewing history
+                                last_viewed = user_history_for_ep[0]
+                                watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
+                                
+                                # Cache show GUID
+                                if show_title not in show_guid_cache:
+                                    series_obj = get_show_from_library(plex, show_title)
+                                    show_guid_cache[show_title] = imdb_guid(series_obj) if series_obj else None
+                                
+                                episodes[guid] = {
+                                    "show": show_title,
+                                    "code": code,
+                                    "watched_at": watched_at,
+                                    "guid": guid,
+                                }
+                                logger.debug("Added from history - Episode: %s %s", show_title, code)
+                            else:
+                                # No history entry, but episode has viewCount > 0
+                                # This could be a manually marked episode
+                                try:
+                                    # Include it with current timestamp as fallback
+                                    # This captures manually marked items
+                                    watched_at = to_iso_z(None)  # Usar tiempo actual como respaldo
+                                    
+                                    # Cache show GUID
+                                    if show_title not in show_guid_cache:
+                                        series_obj = get_show_from_library(plex, show_title)
+                                        show_guid_cache[show_title] = imdb_guid(series_obj) if series_obj else None
+                                    
+                                    episodes[guid] = {
+                                        "show": show_title,
+                                        "code": code,
+                                        "watched_at": watched_at,
+                                        "guid": guid,
+                                    }
+                                    logger.debug("Added manually marked - Episode: %s %s", show_title, code)
+                                except Exception as exc:
+                                    logger.debug("Failed to verify access for episode %s %s: %s", show_title, code, exc)
+                        except Exception as exc:
+                            logger.debug("Failed to check episode %s for user %s: %s", episode.ratingKey, user_id, exc)
+                            
+                except Exception as exc:
+                    logger.warning("Failed to process show section %s: %s", section.title, exc)
+                    
+    except Exception as exc:
+        logger.error("Failed to scan libraries for user %s: %s", user_id, exc)
+
+    logger.info("Final comprehensive count for user %s: %d movies and %d episodes", user_id, len(movies), len(episodes))
+    logger.info("This includes both naturally watched and manually marked content")
+    return movies, episodes
+
+def get_user_watch_counts(plex, user_id=None) -> Dict[str, int]:
+    """
+    Get simplified watch counts for a user using the unified function.
+    
+    Args:
+        plex: PlexServer instance
+        user_id: User ID for accountID parameter. If None, gets counts for owner
+    
+    Returns:
+        Dict with movies, episodes, and total counts
+    """
+    movies, episodes = get_user_plex_history(plex, user_id)
+    return {
+        "movies": len(movies),
+        "episodes": len(episodes),
+        "total": len(movies) + len(episodes),
+    }

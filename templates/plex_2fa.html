@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlexyTrack - 2FA Verification</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+    <style>
+        .two-fa-container {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 30px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .two-fa-header {
+            margin-bottom: 30px;
+        }
+        .two-fa-header h2 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .two-fa-header p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .code-input {
+            width: 100%;
+            padding: 15px;
+            font-size: 20px;
+            text-align: center;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            margin: 20px 0;
+            letter-spacing: 3px;
+            font-family: 'Courier New', monospace;
+            transition: border-color 0.3s;
+        }
+        .code-input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+        }
+        .submit-btn {
+            width: 100%;
+            padding: 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .submit-btn:hover {
+            background: #0056b3;
+        }
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #f5c6cb;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #007bff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
+            <h1>PlexyTrack</h1>
+        </header>
+
+        <main class="content-area">
+            <div class="two-fa-container">
+                <div class="two-fa-header">
+                    <h2>🔐 2FA Verification Required</h2>
+                    <p>Please enter the 6-digit verification code from your authenticator app to complete the login process.</p>
+                </div>
+                
+                {% if error %}
+                    <div class="error-message">{{ error }}</div>
+                {% endif %}
+                
+                <form method="post">
+                    <input type="text" 
+                           id="code" 
+                           name="code" 
+                           class="code-input"
+                           maxlength="6" 
+                           placeholder="000000"
+                           required 
+                           autofocus
+                           pattern="[0-9]{6}"
+                           title="Please enter a 6-digit numeric code">
+                    <button type="submit" class="submit-btn">Verify Code</button>
+                </form>
+                
+                <a href="{{ url_for('users_page') }}" class="back-link">← Back to login</a>
+            </div>
+        </main>
+
+        <footer class="app-footer">
+            <p>MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
+        </footer>
+    </div>
+
+    <script>
+        // Auto-focus and format the input
+        document.getElementById('code').addEventListener('input', function(e) {
+            // Remove any non-numeric characters
+            e.target.value = e.target.value.replace(/\D/g, '');
+            
+            // Auto-submit when 6 digits are entered
+            if (e.target.value.length === 6) {
+                setTimeout(() => {
+                    e.target.form.submit();
+                }, 500);
+            }
+        });
+
+        // Add visual feedback for typing
+        document.getElementById('code').addEventListener('keydown', function(e) {
+            // Allow backspace, delete, tab, escape, enter
+            if ([8, 9, 27, 13, 46].indexOf(e.keyCode) !== -1 ||
+                // Allow Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+                (e.keyCode === 65 && e.ctrlKey === true) ||
+                (e.keyCode === 67 && e.ctrlKey === true) ||
+                (e.keyCode === 86 && e.ctrlKey === true) ||
+                (e.keyCode === 88 && e.ctrlKey === true)) {
+                return;
+            }
+            // Ensure that it is a number and stop the keypress
+            if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+</html>

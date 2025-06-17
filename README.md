@@ -28,8 +28,22 @@ This application is currently in testing and is provided **as is**. I take no re
 
 The application expects the following API credentials:
 
-- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
-- `PLEX_TOKEN` – your Plex authentication token.
+### Plex Authentication (Primary Method - Credentials)
+
+- `PLEX_EMAIL` – your Plex account email address.
+- `PLEX_PASSWORD` – your Plex account password.
+- `PLEX_2FA_CODE` – optional 2FA code (required if 2FA is enabled on your Plex account).
+- `PLEX_SERVER_NAME` – optional specific server name (if you have multiple servers).
+
+### Plex Authentication (Legacy Method - Token)
+
+- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400` (deprecated).
+- `PLEX_TOKEN` – your Plex authentication token (deprecated).
+
+**Note**: The credentials method is now the primary authentication method, following the official PlexAPI schema. It provides better access to managed user histories and supports 2FA authentication.
+
+### Sync Services
+
 - `TRAKT_CLIENT_ID` – client ID for your Trakt application (optional if only using Simkl).
 - `TRAKT_CLIENT_SECRET` – client secret from your Trakt application (optional if only using Simkl).
 - `SIMKL_CLIENT_ID` – client ID for your Simkl application (optional if only using Trakt).
@@ -41,7 +55,7 @@ The application expects the following API credentials:
   unset, the address of the current UI is used automatically.
 - `TZ` – timezone for log timestamps, defaults to `Europe/Madrid`.
 
-You must set the Plex variables above and at least one pair of Trakt or Simkl
+You must set the Plex credentials above and at least one pair of Trakt or Simkl
 credentials. Leave the variables for the service you are not using unset.
 
 You do **not** need to provide a Trakt access token or refresh token. The web
@@ -93,6 +107,13 @@ the application will trigger an immediate sync whenever an event is received.
 3. After saving the app you will see a **Client ID** and **Client Secret**. Keep them handy.
 4. Start PlexyTrack and open `http://localhost:5030` in your browser. From the **Config.** tab you can authorize PlexyTrack on Trakt. After authorizing, Trakt will redirect you to the **OAuth** tab where the code will appear automatically.
 
+## Getting Simkl API credentials
+
+1. Sign in to your Simkl account and visit <https://simkl.com/apps>.
+2. Click **Create new app**, provide any name and set the redirect URL to match `http://localhost:5030/oauth/simkl` or your `SIMKL_REDIRECT_URI`.
+3. After saving the app you will see a **Client ID** and **Client Secret**. Keep them handy.
+4. Open PlexyTrack and from the **Config.** tab choose **Configure** under Simkl to authorize the app.
+
 
 ## Running with Docker Compose
 
@@ -100,8 +121,16 @@ the application will trigger an immediate sync whenever an event is received.
 2. Create a `.env` file in the project root and define the variables listed above. Example:
 
 ```
-PLEX_BASEURL=http://localhost:32400
-PLEX_TOKEN=YOUR_PLEX_TOKEN
+# Plex Authentication - Credentials method (recommended)
+PLEX_EMAIL=your_plex_email@example.com
+PLEX_PASSWORD=your_plex_password
+# PLEX_2FA_CODE=123456  # Only if 2FA is enabled
+# PLEX_SERVER_NAME=MyServer  # Only if you have multiple servers
+
+# Legacy token method (deprecated but still supported)
+# PLEX_BASEURL=http://localhost:32400
+# PLEX_TOKEN=YOUR_PLEX_TOKEN
+
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID

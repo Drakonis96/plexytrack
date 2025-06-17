@@ -12,7 +12,7 @@ from utils import guid_to_ids, normalize_year, to_iso_z, valid_guid, best_guid, 
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.2.6"
+APP_VERSION = "v0.2.7"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 TOKEN_FILE = "trakt_tokens.json"
@@ -580,7 +580,14 @@ def sync_collections_to_trakt(plex, headers):
 
 
 def sync_watchlist(plex, headers, plex_history, trakt_history):
-    account = plex.myPlexAccount()
+    # Import here to avoid circular imports
+    from app import get_plex_account
+    
+    account = get_plex_account()
+    if account is None:
+        logger.error("No Plex account available for watchlist sync")
+        return
+    
     try:
         plex_watch = account.watchlist()
     except Exception as exc:
@@ -806,35 +813,162 @@ def trakt_search_ids(
     is_movie: bool = True,
     year: Optional[int] = None,
 ) -> Dict[str, Union[str, int]]:
-    """Search Trakt by title and return a mapping of IDs.
-
-    If no clear result is found, returns an empty dict.
-    """
-    # Use text search endpoint
-    params = {"query": title, "type": "movie" if is_movie else "show", "limit": 1}
-    # Trakt search supports year filtering
-    if year and is_movie:
-        params["year"] = year
-    try:
-        resp = trakt_request("GET", "/search/text", headers, params=params)
-        data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Trakt search failed for '%s': %s", title, exc)
-        return {}
-
-    if not isinstance(data, list) or not data:
-        return {}
-
-    # Extract the media item from the search result
-    result = data[0]
+    """Search for a movie/show on Trakt and return its IDs."""
     media_type = "movie" if is_movie else "show"
-    media_item = result.get(media_type, {})
+    query_params = {"query": title, "type": media_type}
+    if year:
+        query_params["year"] = year
+
+    resp = trakt_request("GET", "/search", headers, params=query_params)
+    data = resp.json()
+
+    for result in data:
+        item = result.get(media_type)
+        if item:
+            ids = item.get("ids", {})
+            if ids:
+                return ids
+    return {}
+
+
+def scrobble_item_to_trakt(headers: dict, item_data: dict, progress: float = 100.0) -> bool:
+    """
+    Scrobble an item to Trakt using the /scrobble/stop endpoint.
+    This is used for managed users where we want to mark items as watched.
     
-    ids = media_item.get("ids", {}) or {}
-    # Normalize integer IDs
-    for k, v in list(ids.items()):
+    Args:
+        headers: Trakt API headers
+        item_data: Dict containing item info (title, year, ids, etc.)
+        progress: Progress percentage (default 100.0 to mark as watched)
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Use scrobble/stop endpoint with 100% progress to mark as watched
+        payload = {
+            "progress": progress
+        }
+        
+        if item_data.get("type") == "movie":
+            payload["movie"] = {
+                "title": item_data.get("title"),
+                "year": item_data.get("year"),
+                "ids": item_data.get("ids", {})
+            }
+        elif item_data.get("type") == "episode":
+            payload["episode"] = {
+                "title": item_data.get("episode_title", ""),
+                "season": item_data.get("season"),
+                "number": item_data.get("episode"), 
+                "ids": item_data.get("episode_ids", {})
+            }
+            if item_data.get("show_ids"):
+                payload["show"] = {
+                    "title": item_data.get("show_title"),
+                    "year": item_data.get("show_year"),
+                    "ids": item_data.get("show_ids", {})
+                }
+        
+        resp = trakt_request("POST", "/scrobble/stop", headers, json=payload)
+        
+        if resp.status_code in (200, 201):
+            logger.info("Successfully scrobbled %s to Trakt", item_data.get("title", "item"))
+            return True
+        elif resp.status_code == 409:
+            # Item was already scrobbled recently
+            logger.debug("Item already scrobbled recently: %s", item_data.get("title", "item"))
+            return True
+        else:
+            logger.error("Failed to scrobble %s: HTTP %d", item_data.get("title", "item"), resp.status_code)
+            return False
+            
+    except Exception as exc:
+        logger.error("Error scrobbling %s to Trakt: %s", item_data.get("title", "item"), exc)
+        return False
+
+
+def update_trakt_for_managed_user(headers: dict, movies: list, episodes: list) -> None:
+    """
+    Update Trakt for a managed user using scrobble endpoints.
+    This marks items as watched by scrobbling them with 100% progress.
+    
+    Args:
+        headers: Trakt API headers  
+        movies: List of movie data
+        episodes: List of episode data
+    """
+    logger.info("Syncing %d movies and %d episodes to Trakt for managed user using scrobble", 
+                len(movies), len(episodes))
+    
+    scrobbled_movies = 0
+    scrobbled_episodes = 0
+    
+    # Scrobble movies
+    for title, year, watched_at, guid in movies:
+        if not guid or not valid_guid(guid):
+            continue
+            
+        # Get IDs from GUID
+        ids = guid_to_ids(guid)
+        if not ids:
+            continue
+            
+        item_data = {
+            "type": "movie",
+            "title": title,
+            "year": year,
+            "ids": ids,
+            "watched_at": watched_at
+        }
+        
+        if scrobble_item_to_trakt(headers, item_data):
+            scrobbled_movies += 1
+    
+    # Scrobble episodes
+    for show_title, code, watched_at, guid in episodes:
+        if not guid or not valid_guid(guid):
+            continue
+            
+        # Parse season/episode from code (format: S01E01)
         try:
-            ids[k] = int(v) if str(v).isdigit() else v
-        except Exception:
-            pass
-    return ids
+            season_match = code.split("S")[1].split("E")[0]
+            episode_match = code.split("E")[1]
+            season_num = int(season_match)
+            episode_num = int(episode_match)
+        except (IndexError, ValueError):
+            logger.warning("Invalid episode code format: %s", code)
+            continue
+            
+        # For episodes, we need show IDs - try to get them from the library
+        show_ids = {}
+        try:
+            from app import get_plex_server
+            plex_server = get_plex_server()
+            if plex_server:
+                show_obj = get_show_from_library(plex_server, show_title)
+                if show_obj:
+                    show_guid = imdb_guid(show_obj) or best_guid(show_obj)
+                    if show_guid:
+                        show_ids = guid_to_ids(show_guid)
+        except Exception as exc:
+            logger.debug("Could not get show IDs for %s: %s", show_title, exc)
+        
+        # Episode IDs from the episode GUID
+        episode_ids = guid_to_ids(guid)
+        
+        item_data = {
+            "type": "episode", 
+            "show_title": show_title,
+            "show_ids": show_ids,
+            "season": season_num,
+            "episode": episode_num,
+            "episode_ids": episode_ids,
+            "watched_at": watched_at
+        }
+        
+        if scrobble_item_to_trakt(headers, item_data):
+            scrobbled_episodes += 1
+    
+    logger.info("Successfully scrobbled %d movies and %d episodes to Trakt", 
+                scrobbled_movies, scrobbled_episodes)

@@ -1,0 +1,23 @@
+Config plexapi.config
+classplexapi.config.PlexConfig(path)[source]
+Bases: ConfigParser
+
+PlexAPI configuration object. Settings are stored in an INI file within the user’s home directory and can be overridden after importing plexapi by simply setting the value. See the documentation section ‘Configuration’ for more details on available options.
+
+Parameters
+:
+path (str) – Path of the configuration file to load.
+
+get(key, default=None, cast=None)[source]
+Returns the specified configuration value or <default> if not found.
+
+Parameters
+:
+key (str) – Configuration variable to load in the format ‘<section>.<variable>’.
+
+default – Default value to use if key not found.
+
+cast (func) – Cast the value to the specified type before returning.
+
+plexapi.config.reset_base_headers()[source]
+Convenience function returns a dict of all base X-Plex-* headers for session requests.

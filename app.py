@@ -24,12 +24,15 @@ from flask import (
     redirect,
     url_for,
     has_request_context,
+    jsonify,
 )
-from flask import send_file
+from flask import send_file, session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
+from getpass import getpass
 
 from utils import (
     to_iso_z,
@@ -48,7 +51,7 @@ from utils import (
     trakt_episode_key,
     simkl_episode_key,
 )
-from plex_utils import get_plex_history, update_plex
+from plex_utils import get_plex_history, update_plex, get_user_plex_history, get_user_watch_counts, get_owner_watch_counts, get_managed_user_watch_counts, get_owner_plex_history, get_managed_user_plex_history
 from trakt_utils import (
     load_trakt_tokens,
     save_trakt_tokens,
@@ -108,13 +111,14 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.2.6"
+APP_VERSION = "v0.2.7"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
 # FLASK + APSCHEDULER
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-change-in-production')
 
 SYNC_INTERVAL_MINUTES = 60  # default frequency
 SYNC_COLLECTION = False
@@ -127,6 +131,7 @@ SYNC_PROVIDER = "none"  # trakt | simkl | none
 PROVIDER_FILE = "provider.json"
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
+plex_account = None  # will hold MyPlexAccount instance
 
 # --------------------------------------------------------------------------- #
 # TRAKT / SIMKL OAUTH CONSTANTS
@@ -193,6 +198,128 @@ def get_simkl_redirect_uri() -> str:
         SIMKL_REDIRECT_URI = request.url_root.rstrip("/") + "/oauth/simkl"
         return SIMKL_REDIRECT_URI
     return "http://localhost:5030/oauth/simkl"
+
+
+def get_plex_server_legacy():
+    """
+    Legacy fallback method using token authentication.
+    Used when credentials are not provided.
+    """
+    baseurl = os.environ.get("PLEX_BASEURL")
+    token = os.environ.get("PLEX_TOKEN")
+    if not baseurl or not token:
+        return None
+    try:
+        from plexapi.server import PlexServer
+        return PlexServer(baseurl, token)
+    except Exception as exc:
+        logger.error("Failed to connect to Plex using legacy token method: %s", exc)
+        return None
+
+
+def get_plex_server():
+    """Return a connected :class:`PlexServer` instance or ``None``."""
+    global plex, plex_account
+    if plex is None:
+        # Método principal: usar credenciales según el esquema proporcionado
+        email = os.environ.get("PLEX_EMAIL")
+        password = os.environ.get("PLEX_PASSWORD")
+        
+        if email and password:
+            try:
+                # Intentar login básico primero
+                try:
+                    plex_account = MyPlexAccount(email, password)
+                    logger.info("Successfully authenticated with Plex (no 2FA required)")
+                except Exception as first_exc:
+                    # Si falla, verificar si necesita 2FA
+                    error_str = str(first_exc).lower()
+                    logger.info("Plex authentication error: %s", error_str)
+                    
+                    # Various ways to detect 2FA requirement
+                    requires_2fa = any([
+                        "two-factor" in error_str,
+                        "2fa" in error_str,
+                        "verification code" in error_str,
+                        "code=\"1029\"" in error_str,
+                        "1029" in error_str and ("verification" in error_str or "unauthorized" in error_str),
+                        ("unauthorized" in error_str and "verification" in error_str),
+                        "please enter the verification" in error_str,
+                        "enter the verification code" in error_str
+                    ])
+                    
+                    if requires_2fa:
+                        logger.info("2FA required for Plex authentication")
+                        from flask import redirect, url_for, has_request_context
+                        if has_request_context():
+                            # Just return None and let the caller handle it
+                            return None
+                        otp = os.environ.get("PLEX_2FA_CODE")
+                        if not otp:
+                            logger.error("2FA required but PLEX_2FA_CODE not provided")
+                            return None
+                        plex_account = MyPlexAccount(email, password, code=otp)
+                        logger.info("Successfully authenticated with Plex using 2FA")
+                    else:
+                        # Si no es un error de 2FA, re-lanzar la excepción
+                        raise first_exc
+                
+                logger.info("2FA active: %s", plex_account.twoFactorEnabled)
+                
+                # Obtener el servidor de Plex
+                server_name = os.environ.get("PLEX_SERVER_NAME")
+                if server_name:
+                    # Usar servidor específico
+                    resource = plex_account.resource(server_name)
+                    plex = resource.connect()
+                    logger.info("Connected to Plex server: %s", server_name)
+                else:
+                    # Usar el primer servidor disponible
+                    resources = plex_account.resources()
+                    plex_resources = [r for r in resources if r.product == 'Plex Media Server']
+                    if not plex_resources:
+                        logger.error("No Plex Media Server found in account")
+                        return None
+                    plex = plex_resources[0].connect()
+                    logger.info("Connected to Plex server: %s", plex_resources[0].name)
+                    
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to connect to Plex using credentials: %s", exc)
+                from flask import redirect, url_for, has_request_context
+                error_str = str(exc).lower()
+                
+                # Various ways to detect 2FA requirement
+                requires_2fa = any([
+                    "two-factor" in error_str,
+                    "2fa" in error_str,
+                    "verification code" in error_str,
+                    "code=\"1029\"" in error_str,
+                    "1029" in error_str and ("verification" in error_str or "unauthorized" in error_str),
+                    ("unauthorized" in error_str and "verification" in error_str),
+                    "please enter the verification" in error_str,
+                    "enter the verification code" in error_str
+                ])
+                
+                if has_request_context() and requires_2fa:
+                    # Just return None and let the page handle 2FA
+                    return None
+                plex = None
+                plex_account = None
+        else:
+            # Fallback: método legacy con token
+            logger.warning("PLEX_EMAIL/PLEX_PASSWORD not provided, trying legacy token method")
+            plex = get_plex_server_legacy()
+            plex_account = None  # No account available with token method
+            
+    return plex
+
+
+def get_plex_account():
+    """Return the authenticated MyPlexAccount instance or None."""
+    global plex_account
+    # Ensure server connection is established first (which also sets up the account)
+    get_plex_server()
+    return plex_account
 
 
 # --------------------------------------------------------------------------- #
@@ -796,7 +923,7 @@ def get_simkl_history(
     Dict[str, Tuple[str, Optional[int], Optional[str]]],
     Dict[str, Tuple[str, str, Optional[str]]],
 ]:
-    """Return Simkl movie and episode history keyed by best GUID.
+    """Return Simkl movie and episode history keyed on best GUID.
     
     Returns:
         Tuple containing:
@@ -807,22 +934,18 @@ def get_simkl_history(
     episodes: Dict[str, Tuple[str, str, Optional[str]]] = {}
     
     # First, get movies from sync/history (watched history)
-    params = {"limit": 100, "type": "movies"}
+    params = {"type": "movies"}
     if date_from:
         params["date_from"] = date_from
-    page = 1
     logger.info("Fetching Simkl watch history…")
-    while True:
-        params["page"] = page
-        resp = simkl_request(
-            "GET",
-            "/sync/history",
-            headers,
-            params=params,
-        )
-        data = resp.json()
-        if not isinstance(data, list) or not data:
-            break
+    resp = simkl_request(
+        "GET",
+        "/sync/history",
+        headers,
+        params=params,
+    )
+    data = resp.json()
+    if isinstance(data, list):
         for item in data:
             m = item.get("movie", {})
             guid = simkl_movie_key(m)
@@ -834,25 +957,20 @@ def get_simkl_history(
                     normalize_year(m.get("year")),
                     item.get("watched_at"),
                 )
-        page += 1
     
     # Get episodes from sync/history
-    params = {"limit": 100, "type": "episodes"}
+    params = {"type": "episodes"}
     if date_from:
         params["date_from"] = date_from
-    page = 1
     logger.info("Fetching Simkl episode history…")
-    while True:
-        params["page"] = page
-        resp = simkl_request(
-            "GET",
-            "/sync/history",
-            headers,
-            params=params,
-        )
-        data = resp.json()
-        if not isinstance(data, list) or not data:
-            break
+    resp = simkl_request(
+        "GET",
+        "/sync/history",
+        headers,
+        params=params,
+    )
+    data = resp.json()
+    if isinstance(data, list):
         for item in data:
             e = item.get("episode", {})
             show = item.get("show", {})
@@ -865,7 +983,6 @@ def get_simkl_history(
                     f"S{e.get('season', 0):02d}E{e.get('number', 0):02d}",
                     item.get("watched_at"),
                 )
-        page += 1
     
     # Then, get movies from sync/all-items to include completed movies
     logger.info("Fetching Simkl all-items (full)…")
@@ -1035,165 +1152,6 @@ def update_simkl(
 # --------------------------------------------------------------------------- #
 # PLEX ↔ TRAKT
 # --------------------------------------------------------------------------- #
-def get_plex_history(plex) -> Tuple[
-    Dict[str, Dict[str, Optional[str]]],
-    Dict[str, Dict[str, Optional[str]]],
-]:
-    """Return watched movies and episodes from Plex keyed by IMDb or TMDb GUID."""
-    movies: Dict[str, Dict[str, Optional[str]]] = {}
-    episodes: Dict[str, Dict[str, Optional[str]]] = {}
-    # Cache para no abrir la biblioteca en cada episodio cuando necesitamos el GUID de la serie
-    show_guid_cache: Dict[str, Optional[str]] = {}
-
-    logger.info("Fetching Plex history…")
-    for entry in plex.history():
-        watched_at = to_iso_z(getattr(entry, "viewedAt", None))
-
-        # Movies
-        if entry.type == "movie":
-            try:
-                item = entry.source() or plex.fetchItem(entry.ratingKey)
-            except Exception as exc:
-                logger.debug(
-                    "Failed to fetch movie %s from Plex: %s", entry.ratingKey, exc
-                )
-                continue
-
-            title = item.title
-            year = normalize_year(getattr(item, "year", None))
-            guid = imdb_guid(item)
-            if not guid:
-                continue
-            if guid not in movies:
-                movies[guid] = {
-                    "title": title,
-                    "year": year,
-                    "watched_at": watched_at,
-                    "guid": guid,
-                }
-
-        # Episodes
-        elif entry.type == "episode":
-            season = getattr(entry, "parentIndex", None)
-            number = getattr(entry, "index", None)
-            show = getattr(entry, "grandparentTitle", None)
-            try:
-                item = entry.source() or plex.fetchItem(entry.ratingKey)
-            except Exception as exc:
-                logger.debug(
-                    "Failed to fetch episode %s from Plex: %s", entry.ratingKey, exc
-                )
-                item = None
-            if item:
-                season = season or item.seasonNumber
-                number = number or item.index
-                show = show or item.grandparentTitle
-                guid = imdb_guid(item)
-            else:
-                guid = None
-            if None in (season, number, show):
-                continue
-            code = f"S{int(season):02d}E{int(number):02d}"
-
-            # ------------------- Determinar clave normalizada ------------------- #
-
-            # Preferimos usar GUID de serie + codigo para coincidir con Simkl.
-            series_guid: Optional[str] = None
-
-            # (1) GUID directo desde el episodio
-            if item is not None:
-                gp_guid_raw = getattr(item, "grandparentGuid", None)
-                if gp_guid_raw:
-                    series_guid = _parse_guid_value(gp_guid_raw)
-
-            # (2) consulta a la cache
-            if series_guid is None and show in show_guid_cache:
-                series_guid = show_guid_cache[show]
-
-            # (3) busqueda en biblioteca si todavia no tenemos GUID
-            if series_guid is None and show:
-                series_obj = get_show_from_library(plex, show)
-                series_guid = imdb_guid(series_obj) if series_obj else None
-                show_guid_cache[show] = series_guid
-
-            if series_guid and valid_guid(series_guid):
-                key = (series_guid, code)
-            elif guid:
-                key = guid
-            else:
-                key = (show.lower() if show else "", code)
-            if key not in episodes:
-                episodes[key] = {
-                    "show": show,
-                    "code": code,
-                    "watched_at": watched_at,
-                    "guid": guid,  # puede ser None cuando no hay GUID
-                }
-
-    logger.info("Fetching watched flags from Plex library…")
-    for section in plex.library.sections():
-        try:
-            if section.type == "movie":
-                for item in section.search(viewCount__gt=0):
-                    title = item.title
-                    year = normalize_year(getattr(item, "year", None))
-                    guid = imdb_guid(item)
-                    if guid and guid not in movies:
-                        movies[guid] = {
-                            "title": title,
-                            "year": year,
-                            "watched_at": to_iso_z(getattr(item, "lastViewedAt", None)),
-                            "guid": guid,
-                        }
-            elif section.type == "show":
-                for ep in section.searchEpisodes(viewCount__gt=0):
-                    code = f"S{int(ep.seasonNumber):02d}E{int(ep.episodeNumber):02d}"
-                    guid = imdb_guid(ep)
-                    show_title = getattr(ep, "grandparentTitle", None)
-
-                    key: Union[str, Tuple[str, str]]
-                    if guid:
-                        key = guid
-                    else:
-                        series_guid: Optional[str] = None
-
-                        # (1) From episode's grandparentGuid
-                        gp_guid_raw = getattr(ep, "grandparentGuid", None)
-                        if gp_guid_raw:
-                            series_guid = _parse_guid_value(gp_guid_raw)
-
-                        # (2) From cache
-                        if series_guid is None and show_title and show_title in show_guid_cache:
-                            series_guid = show_guid_cache[show_title]
-
-                        # (3) From library search if still no GUID
-                        if series_guid is None and show_title:
-                            series_obj = get_show_from_library(plex, show_title)
-                            series_guid = (
-                                imdb_guid(series_obj) if series_obj else None
-                            )
-                            show_guid_cache[show_title] = series_guid
-
-                        # Key composition
-                        if series_guid and valid_guid(series_guid):
-                            key = (series_guid, code)
-                        else:
-                            key = (show_title.lower() if show_title else "", code)
-
-                    if key not in episodes:
-                        episodes[key] = {
-                            "show": show_title,
-                            "code": code,
-                            "watched_at": to_iso_z(getattr(ep, "lastViewedAt", None)),
-                            "guid": guid,
-                        }
-        except Exception as exc:
-            logger.debug(
-                "Failed fetching watched items from section %s: %s", section.title, exc
-            )
-
-    return movies, episodes
-
 
 def get_trakt_history_basic(
     headers: dict,
@@ -1437,9 +1395,15 @@ def sync():
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
 
-    plex_movies, plex_episodes = get_plex_history(plex)
+    # Use new schema: get owner history via MyPlexAccount
+    account = get_plex_account()
+    if account is None:
+        logger.error("No Plex account available for sync")
+        return
+        
+    plex_movies, plex_episodes = get_owner_plex_history(account)
     logger.info(
-        "Found %d movies and %d episodes in Plex history.",
+        "Found %d movies and %d episodes in owner Plex history.",
         len(plex_movies),
         len(plex_episodes),
     )
@@ -2074,13 +2038,453 @@ def restore_backup_route():
     return redirect(url_for("backup_page", message="Backup restored", mtype="success"))
 
 
-@app.route("/webhook", methods=["POST"])
-def plex_webhook():
-    """Handle Plex webhook events for live synchronization."""
-    if LIVE_SYNC:
-        # Trigger a one-off sync immediately
-        scheduler.add_job(sync, "date", run_date=datetime.now())
-    return "", 204
+@app.route("/users")
+def users_page():
+    """Display Plex users and optional play history counts."""
+    # No intentar conectar automáticamente - la página manejará la autenticación
+    # Esta página ahora usa la interfaz interactiva para autenticación
+    
+    # Si hay credenciales configuradas, intentar obtener información automáticamente
+    email = os.environ.get("PLEX_EMAIL")
+    password = os.environ.get("PLEX_PASSWORD")
+    
+    owner = None
+    users = []
+    watch_counts = None
+    
+    if email and password:
+        # Solo si hay credenciales preconfiguradas, intentar conexión automática
+        try:
+            plex_server = get_plex_server()
+            account = get_plex_account()
+            
+            if plex_server and account:
+                # Obtener información del owner desde la cuenta myPlex
+                owner = {
+                    "id": account.id,
+                    "username": account.username,
+                    "role": "owner",
+                    "selectable": True,
+                    "is_owner": True,
+                }
+
+                # Obtener usuarios gestionados usando el nuevo esquema
+                try:
+                    for user in account.users():
+                        logger.debug("MyPlexUser: ID=%s, username=%s, title=%s, home=%s, friend=%s", 
+                                    getattr(user, 'id', 'N/A'), 
+                                    getattr(user, 'username', 'N/A'), 
+                                    getattr(user, 'title', 'N/A'),
+                                    getattr(user, 'home', 'N/A'),
+                                    getattr(user, 'friend', 'N/A'))
+                        
+                        # Determinar el rol del usuario correctamente
+                        if hasattr(user, 'home') and user.home:
+                            role = "managed user"
+                            selectable = True  # Los managed users son seleccionables
+                        elif hasattr(user, 'friend') and user.friend:
+                            role = "friend"
+                            selectable = False  # Los friends no son seleccionables para historial
+                        else:
+                            role = "user"
+                            selectable = False
+                        
+                        users.append({
+                            "id": user.id,
+                            "username": user.username or user.title,
+                            "role": role,
+                            "selectable": selectable,
+                            "home": getattr(user, 'home', False),
+                            "friend": getattr(user, 'friend', False),
+                            "is_owner": False,
+                        })
+                    logger.info("Found %d myPlex users", len(users))
+                except Exception as exc:
+                    logger.error("Failed to get myPlex users: %s", exc)
+
+                selected_id = request.args.get("user")
+                if selected_id:
+                    try:
+                        uid = int(selected_id)
+                    except ValueError:
+                        logger.warning("Invalid user ID format: %s", selected_id)
+                        uid = None
+                    
+                    if uid is not None:
+                        try:
+                            # Usar el nuevo esquema para obtener el historial
+                            if uid == account.id:
+                                logger.info("Fetching viewing data for owner (account ID: %s)", uid)
+                                # Para el owner, obtener historial global
+                                watch_counts = get_owner_watch_counts(account)
+                            else:
+                                logger.info("Fetching viewing data for managed user ID: %s", uid)
+                                # Para usuarios gestionados, usar account.user()
+                                watch_counts = get_managed_user_watch_counts(account, uid)
+                            
+                            logger.info("Successfully fetched watch counts for user %s: %d movies, %d episodes", 
+                                       uid, watch_counts["movies"], watch_counts["episodes"])
+                                
+                        except Exception as exc:
+                            logger.error("Failed to fetch history for user ID %s: %s", uid, exc)
+                            watch_counts = {
+                                "movies": 0,
+                                "episodes": 0,
+                                "total": 0,
+                                "error": str(exc)
+                            }
+        except Exception as exc:
+            logger.warning("Auto-authentication failed, will use interactive mode: %s", exc)
+
+    return render_template(
+        "users.html",
+        owner=owner,
+        users=users,
+        watch_counts=watch_counts,
+        selected_id=int(request.args.get("user")) if request.args.get("user") else None,
+    )
+
+
+@app.route("/api/auth/plex", methods=["POST"])
+def api_auth_plex():
+    """API endpoint for Plex authentication with email/password and optional 2FA."""
+    data = request.get_json()
+    email = data.get("email")
+    password = data.get("password")
+    code = data.get("code")  # 2FA code if provided
+    
+    if not email or not password:
+        return jsonify({"success": False, "error": "Email and password are required"})
+    
+    try:
+        if code:
+            # Authentication with 2FA
+            account = MyPlexAccount(email, password, code=code)
+            logger.info("Successfully authenticated with Plex using 2FA")
+        else:
+            # Try authentication without 2FA first
+            try:
+                account = MyPlexAccount(email, password)
+                logger.info("Successfully authenticated with Plex (no 2FA required)")
+            except Exception as first_exc:
+                # Check if the error indicates 2FA is required
+                error_str = str(first_exc).lower()
+                logger.info("Plex authentication error: %s", error_str)
+                
+                # Various ways to detect 2FA requirement
+                requires_2fa = any([
+                    "two-factor" in error_str,
+                    "2fa" in error_str,
+                    "verification code" in error_str,
+                    "code=\"1029\"" in error_str,
+                    "1029" in error_str and ("verification" in error_str or "unauthorized" in error_str),
+                    ("unauthorized" in error_str and "verification" in error_str),
+                    "please enter the verification" in error_str,
+                    "enter the verification code" in error_str
+                ])
+                
+                if requires_2fa:
+                    logger.info("2FA required - detected from error: %s", error_str)
+                    return jsonify({"success": True, "requires_2fa": True})
+                else:
+                    raise first_exc
+        
+        # Store authentication in session
+        session['plex_email'] = email
+        session['plex_password'] = password
+        if code:
+            session['plex_2fa_code'] = code
+        session['plex_account_id'] = account.id
+        session['plex_username'] = account.username
+        
+        # Store account in global variable for reuse
+        global plex_account
+        plex_account = account
+        
+        return jsonify({
+            "success": True, 
+            "requires_2fa": False,
+            "token": f"session_{account.id}",  # Simple session-based token
+            "username": account.username,
+            "two_factor_enabled": account.twoFactorEnabled
+        })
+        
+    except Exception as exc:
+        logger.error("Plex authentication failed: %s", exc)
+        return jsonify({"success": False, "error": str(exc)})
+
+
+@app.route("/api/plex/servers", methods=["GET"])
+def api_get_servers():
+    """API endpoint to get available Plex servers for authenticated user."""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "error": "Authorization required"})
+    
+    # Get account from session - try to reuse existing account object
+    account_id = session.get('plex_account_id')
+    email = session.get('plex_email')
+    password = session.get('plex_password')
+    code = session.get('plex_2fa_code')
+    
+    if not email or not password:
+        return jsonify({"success": False, "error": "Authentication session expired"})
+    
+    try:
+        # Try to reuse the global plex_account if it exists and matches
+        global plex_account
+        if plex_account and hasattr(plex_account, 'id') and plex_account.id == account_id:
+            account = plex_account
+            logger.info("Reusing existing Plex account session")
+        else:
+            # Only re-authenticate if we don't have a valid session
+            # For 2FA users, avoid re-authentication with same code
+            if code:
+                # Don't re-authenticate with 2FA code as it's single-use
+                # Try without code first, this might work if session is still valid
+                try:
+                    account = MyPlexAccount(email, password)
+                    logger.info("Successfully authenticated with Plex (2FA session still valid)")
+                except Exception:
+                    # If that fails, we need user to re-authenticate
+                    logger.error("2FA session expired, user needs to re-authenticate")
+                    return jsonify({"success": False, "error": "2FA session expired, please re-authenticate"})
+            else:
+                account = MyPlexAccount(email, password)
+                logger.info("Successfully authenticated with Plex")
+            
+            # Update global account reference
+            plex_account = account
+        
+        # Get available servers
+        resources = account.resources()
+        plex_servers = [r for r in resources if r.product == 'Plex Media Server']
+        
+        servers = []
+        for server in plex_servers:
+            server_info = {
+                "name": server.name,
+                "product": server.product,
+            }
+            
+            # Add optional attributes if they exist
+            if hasattr(server, 'version'):
+                server_info["version"] = server.version
+            if hasattr(server, 'owner'):
+                server_info["owner"] = server.owner
+            if hasattr(server, 'owned'):
+                server_info["owned"] = server.owned
+            
+            servers.append(server_info)
+        
+        return jsonify({"success": True, "servers": servers})
+        
+    except Exception as exc:
+        logger.error("Failed to get Plex servers: %s", exc)
+        return jsonify({"success": False, "error": str(exc)})
+
+
+@app.route("/api/plex/users", methods=["GET"])
+def api_get_users():
+    """API endpoint to get users for a specific Plex server."""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "error": "Authorization required"})
+    
+    server_name = request.args.get('server')
+    if not server_name:
+        return jsonify({"success": False, "error": "Server name required"})
+    
+    # Get account from session - try to reuse existing account object
+    account_id = session.get('plex_account_id')
+    email = session.get('plex_email')
+    password = session.get('plex_password')
+    code = session.get('plex_2fa_code')
+    
+    if not email or not password:
+        return jsonify({"success": False, "error": "Authentication session expired"})
+    
+    try:
+        # Try to reuse the global plex_account if it exists and matches
+        global plex_account
+        if plex_account and hasattr(plex_account, 'id') and plex_account.id == account_id:
+            account = plex_account
+            logger.info("Reusing existing Plex account session")
+        else:
+            # Only re-authenticate if we don't have a valid session
+            # For 2FA users, avoid re-authentication with same code
+            if code:
+                # Don't re-authenticate with 2FA code as it's single-use
+                # Try without code first, this might work if session is still valid
+                try:
+                    account = MyPlexAccount(email, password)
+                    logger.info("Successfully authenticated with Plex (2FA session still valid)")
+                except Exception:
+                    # If that fails, we need user to re-authenticate
+                    logger.error("2FA session expired, user needs to re-authenticate")
+                    return jsonify({"success": False, "error": "2FA session expired, please re-authenticate"})
+            else:
+                account = MyPlexAccount(email, password)
+                logger.info("Successfully authenticated with Plex")
+            
+            # Update global account reference
+            plex_account = account
+        
+        # Get owner info
+        owner = {
+            "id": account.id,
+            "username": account.username,
+            "role": "owner",
+            "selectable": True,
+            "is_owner": True,
+        }
+        
+        # Get managed users
+        users = []
+        for user in account.users():
+            # Determine user role and selectability
+            if hasattr(user, 'home') and user.home:
+                role = "managed user"
+                selectable = True
+            elif hasattr(user, 'friend') and user.friend:
+                role = "friend"
+                selectable = False
+            else:
+                role = "user"
+                selectable = False
+            
+            users.append({
+                "id": user.id,
+                "username": user.username or user.title,
+                "role": role,
+                "selectable": selectable,
+                "home": getattr(user, 'home', False),
+                "friend": getattr(user, 'friend', False),
+                "is_owner": False,
+            })
+        
+        return jsonify({
+            "success": True, 
+            "owner": owner,
+            "users": users,
+            "server_name": server_name
+        })
+        
+    except Exception as exc:
+        logger.error("Failed to get Plex users: %s", exc)
+        return jsonify({"success": False, "error": str(exc)})
+
+
+@app.route("/api/plex/history", methods=["GET"])
+def api_get_user_history():
+    """API endpoint to get viewing history for a specific user."""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "error": "Authorization required"})
+    
+    server_name = request.args.get('server')
+    user_id = request.args.get('user')
+    
+    if not server_name or not user_id:
+        return jsonify({"success": False, "error": "Server name and user ID required"})
+    
+    # Get account from session - try to reuse existing account object
+    account_id = session.get('plex_account_id')
+    email = session.get('plex_email')
+    password = session.get('plex_password')
+    code = session.get('plex_2fa_code')
+    
+    if not email or not password:
+        return jsonify({"success": False, "error": "Authentication session expired"})
+    
+    try:
+        # Try to reuse the global plex_account if it exists and matches
+        global plex_account
+        if plex_account and hasattr(plex_account, 'id') and plex_account.id == account_id:
+            account = plex_account
+            logger.info("Reusing existing Plex account session")
+        else:
+            # Only re-authenticate if we don't have a valid session
+            # For 2FA users, avoid re-authentication with same code
+            if code:
+                # Don't re-authenticate with 2FA code as it's single-use
+                # Try without code first, this might work if session is still valid
+                try:
+                    account = MyPlexAccount(email, password)
+                    logger.info("Successfully authenticated with Plex (2FA session still valid)")
+                except Exception:
+                    # If that fails, we need user to re-authenticate
+                    logger.error("2FA session expired, user needs to re-authenticate")
+                    return jsonify({"success": False, "error": "2FA session expired, please re-authenticate"})
+            else:
+                account = MyPlexAccount(email, password)
+                logger.info("Successfully authenticated with Plex")
+            
+            # Update global account reference
+            plex_account = account
+        
+        user_id_int = int(user_id)
+        
+        # Get viewing history based on user type
+        if user_id_int == account.id:
+            # Owner history
+            movies, episodes = get_owner_plex_history(account)
+        else:
+            # Managed user history
+            movies, episodes = get_managed_user_plex_history(account, user_id_int, server_name)
+        
+        # Prepare history data
+        history_items = []
+        
+        # Add movies to history
+        for movie_data in list(movies.values())[:50]:  # Limit to 50 recent items
+            history_items.append({
+                "title": movie_data.get("title", "Unknown"),
+                "year": movie_data.get("year"),
+                "type": "movie",
+                "watched_at": movie_data.get("watched_at"),
+                "guid": movie_data.get("guid")
+            })
+        
+        # Add episodes to history
+        for episode_data in list(episodes.values())[:50]:  # Limit to 50 recent items
+            history_items.append({
+                "title": episode_data.get("title", "Unknown"),
+                "show_title": episode_data.get("show_title"),
+                "season": episode_data.get("season"),
+                "episode": episode_data.get("episode"),
+                "type": "episode",
+                "watched_at": episode_data.get("watched_at"),
+                "guid": episode_data.get("guid")
+            })
+        
+        # Sort by watched date (most recent first)
+        history_items.sort(key=lambda x: x.get("watched_at") or "", reverse=True)
+        
+        stats = {
+            "movies": len(movies),
+            "episodes": len(episodes),
+            "total": len(movies) + len(episodes)
+        }
+        
+        return jsonify({
+            "success": True,
+            "stats": stats,
+            "history": history_items[:100],  # Return up to 100 items
+            "user_id": user_id_int,
+            "server_name": server_name
+        })
+        
+    except Exception as exc:
+        logger.error("Failed to get user history: %s", exc)
+        return jsonify({"success": False, "error": str(exc)})
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    """Clear all session data and log out the user."""
+    session.clear()
+    return jsonify({"success": True, "message": "Successfully logged out"})
 
 
 # --------------------------------------------------------------------------- #
@@ -2088,8 +2492,11 @@ def plex_webhook():
 # --------------------------------------------------------------------------- #
 def test_connections() -> bool:
     global plex
+    plex_email = os.environ.get("PLEX_EMAIL")
+    plex_password = os.environ.get("PLEX_PASSWORD")
     plex_baseurl = os.environ.get("PLEX_BASEURL")
     plex_token = os.environ.get("PLEX_TOKEN")
+    
     trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
     trakt_client_id = os.environ.get("TRAKT_CLIENT_ID")
     trakt_enabled = SYNC_PROVIDER == "trakt" and bool(trakt_token and trakt_client_id)
@@ -2097,17 +2504,31 @@ def test_connections() -> bool:
     simkl_client_id = os.environ.get("SIMKL_CLIENT_ID")
     simkl_enabled = SYNC_PROVIDER == "simkl" and bool(simkl_token and simkl_client_id)
 
-    if not all([plex_baseurl, plex_token]):
-        logger.error("Missing environment variables for Plex.")
+    # Check if we have either credentials or legacy token
+    has_credentials = bool(plex_email and plex_password)
+    has_legacy = bool(plex_baseurl and plex_token)
+    
+    if not has_credentials and not has_legacy:
+        logger.error("Missing Plex authentication. Provide either PLEX_EMAIL/PLEX_PASSWORD or PLEX_BASEURL/PLEX_TOKEN.")
         return False
     if not trakt_enabled and not simkl_enabled:
         logger.error("Missing environment variables for selected provider.")
         return False
 
     try:
-        plex = PlexServer(plex_baseurl, plex_token)
-        plex.account()
-        logger.info("Successfully connected to Plex.")
+        plex = get_plex_server()
+        if plex is None:
+            return False
+        # Test connection by accessing account (if available)
+        if has_credentials:
+            account = get_plex_account()
+            if account is None:
+                return False
+            logger.info("Successfully connected to Plex with credentials.")
+        else:
+            # Legacy method - test by accessing server info
+            plex.account()
+            logger.info("Successfully connected to Plex with legacy token.")
     except Exception as exc:
         logger.error("Failed to connect to Plex: %s", exc)
         plex = None
@@ -2136,7 +2557,7 @@ def test_connections() -> bool:
             "simkl-api-key": simkl_client_id,
         }
         try:
-            simkl_request("GET", "/sync/history", headers, params={"limit": 1})
+            simkl_request("GET", "/sync/history", headers)
             logger.info("Successfully connected to Simkl.")
         except Exception as exc:
             logger.error("Failed to connect to Simkl: %s", exc)

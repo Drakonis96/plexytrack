@@ -1,0 +1,263 @@
+Playlist plexapi.playlist
+classplexapi.playlist.Playlist(server, data, initpath=None, parent=None)[source]
+Bases: PlexPartialObject, Playable, SmartFilterMixin, ArtMixin, PosterMixin, PlaylistEditMixins
+
+Represents a single Playlist.
+
+Variables
+:
+TAG (str) – ‘Playlist’
+
+TYPE (str) – ‘playlist’
+
+addedAt (datetime) – Datetime the playlist was added to the server.
+
+allowSync (bool) – True if you allow syncing playlists.
+
+composite (str) – URL to composite image (/playlist/<ratingKey>/composite/<compositeid>)
+
+content (str) – The filter URI string for smart playlists.
+
+duration (int) – Duration of the playlist in milliseconds.
+
+durationInSeconds (int) – Duration of the playlist in seconds.
+
+fields (List<Field>) – List of field objects.
+
+guid (str) – Plex GUID for the playlist (com.plexapp.agents.none://XXXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXX).
+
+icon (str) – Icon URI string for smart playlists.
+
+key (str) – API URL (/playlist/<ratingkey>).
+
+leafCount (int) – Number of items in the playlist view.
+
+librarySectionID (int) – Library section identifier (radio only)
+
+librarySectionKey (str) – Library section key (radio only)
+
+librarySectionTitle (str) – Library section title (radio only)
+
+playlistType (str) – ‘audio’, ‘video’, or ‘photo’
+
+radio (bool) – If this playlist represents a radio station
+
+ratingKey (int) – Unique key identifying the playlist.
+
+smart (bool) – True if the playlist is a smart playlist.
+
+summary (str) – Summary of the playlist.
+
+title (str) – Name of the playlist.
+
+titleSort (str) – Title to use when sorting (defaults to title).
+
+type (str) – ‘playlist’
+
+updatedAt (datetime) – Datetime the playlist was updated.
+
+propertythumb
+Alias to self.composite.
+
+ 
+propertymetadataType
+Returns the type of metadata in the playlist (movie, track, or photo).
+
+ 
+propertyisVideo
+Returns True if this is a video playlist.
+
+ 
+propertyisAudio
+Returns True if this is an audio playlist.
+
+ 
+propertyisPhoto
+Returns True if this is a photo playlist.
+
+filters()[source]
+Returns the search filter dict for smart playlist. The filter dict be passed back into search() to get the list of items.
+
+section()[source]
+Returns the LibrarySection this smart playlist belongs to.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When trying to get the section for a regular playlist.
+
+plexapi.exceptions.Unsupported – When unable to determine the library section.
+
+item(title)[source]
+Returns the item in the playlist that matches the specified title.
+
+Parameters
+:
+title (str) – Title of the item to return.
+
+Raises
+:
+plexapi.exceptions.NotFound – When the item is not found in the playlist.
+
+items()[source]
+Returns a list of all items in the playlist.
+
+get(title)[source]
+Alias to item().
+
+addItems(items)[source]
+Add items to the playlist.
+
+Parameters
+:
+items (List) – List of Audio, Video, or Photo objects to be added to the playlist.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When trying to add items to a smart playlist.
+
+removeItems(items)[source]
+Remove items from the playlist.
+
+Parameters
+:
+items (List) – List of Audio, Video, or Photo objects to be removed from the playlist.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When trying to remove items from a smart playlist.
+
+plexapi.exceptions.NotFound – When the item does not exist in the playlist.
+
+moveItem(item, after=None)[source]
+Move an item to a new position in the playlist.
+
+Parameters
+:
+items (obj) – Audio, Video, or Photo objects to be moved in the playlist.
+
+after (obj) – Audio, Video, or Photo objects to move the item after in the playlist.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When trying to move items in a smart playlist.
+
+plexapi.exceptions.NotFound – When the item or item after does not exist in the playlist.
+
+updateFilters(limit=None, sort=None, filters=None, **kwargs)[source]
+Update the filters for a smart playlist.
+
+Parameters
+:
+limit (int) – Limit the number of items in the playlist.
+
+sort (str or list, optional) – A string of comma separated sort fields or a list of sort fields in the format column:dir. See search() for more info.
+
+filters (dict) – A dictionary of advanced filters. See search() for more info.
+
+**kwargs (dict) – Additional custom filters to apply to the search results. See search() for more info.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When trying update filters for a regular playlist.
+
+edit(title=None, summary=None)[source]
+Edit the playlist.
+
+Parameters
+:
+title (str, optional) – The title of the playlist.
+
+summary (str, optional) – The summary of the playlist.
+
+delete()[source]
+Delete the playlist.
+
+classmethodcreate(server, title, section=None, items=None, smart=False, limit=None, libtype=None, sort=None, filters=None, m3ufilepath=None, **kwargs)[source]
+Create a playlist.
+
+Parameters
+:
+server (PlexServer) – Server to create the playlist on.
+
+title (str) – Title of the playlist.
+
+section (LibrarySection, str) – Smart playlists and m3u import only, the library section to create the playlist in.
+
+items (List) – Regular playlists only, list of Audio, Video, or Photo objects to be added to the playlist.
+
+smart (bool) – True to create a smart playlist. Default False.
+
+limit (int) – Smart playlists only, limit the number of items in the playlist.
+
+libtype (str) – Smart playlists only, the specific type of content to filter (movie, show, season, episode, artist, album, track, photoalbum, photo).
+
+sort (str or list, optional) – Smart playlists only, a string of comma separated sort fields or a list of sort fields in the format column:dir. See search() for more info.
+
+filters (dict) – Smart playlists only, a dictionary of advanced filters. See search() for more info.
+
+m3ufilepath (str) – Music playlists only, the full file path to an m3u file to import. Note: This will overwrite any playlist previously created from the same m3u file.
+
+**kwargs (dict) – Smart playlists only, additional custom filters to apply to the search results. See search() for more info.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When no items are included to create the playlist.
+
+plexapi.exceptions.BadRequest – When mixing media types in the playlist.
+
+plexapi.exceptions.BadRequest – When attempting to import m3u file into non-music library.
+
+plexapi.exceptions.BadRequest – When failed to import m3u file.
+
+Returns
+:
+A new instance of the created Playlist.
+
+Return type
+:
+Playlist
+
+copyToUser(user)[source]
+Copy playlist to another user account.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser object, username, email, or user id of the user to copy the playlist to.
+
+sync(videoQuality=None, photoResolution=None, audioBitrate=None, client=None, clientId=None, limit=None, unwatched=False, title=None)[source]
+Add the playlist as a sync item for the specified device. See sync() for possible exceptions.
+
+Parameters
+:
+videoQuality (int) – idx of quality of the video, one of VIDEO_QUALITY_* values defined in sync module. Used only when playlist contains video.
+
+photoResolution (str) – maximum allowed resolution for synchronized photos, see PHOTO_QUALITY_* values in the module sync. Used only when playlist contains photos.
+
+audioBitrate (int) – maximum bitrate for synchronized music, better use one of MUSIC_BITRATE_* values from the module sync. Used only when playlist contains audio.
+
+client (MyPlexDevice) – sync destination, see sync().
+
+clientId (str) – sync destination, see sync().
+
+limit (int) – maximum count of items to sync, unlimited if None.
+
+unwatched (bool) – if True watched videos wouldn’t be synced.
+
+title (str) – descriptive title for the new SyncItem, if empty the value would be generated from metadata of current photo.
+
+Raises
+:
+BadRequest – When playlist is not allowed to sync.
+
+Unsupported – When playlist content is unsupported.
+
+Returns
+:
+A new instance of the created sync item.
+
+Return type
+:
+SyncItem
+
+propertymetadataDirectory
+Returns the Plex Media Server data directory where the metadata is stored.

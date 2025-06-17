@@ -1,0 +1,780 @@
+Server plexapi.server
+classplexapi.server.PlexServer(baseurl=None, token=None, session=None, timeout=None)[source]
+Bases: PlexObject
+
+This is the main entry point to interacting with a Plex server. It allows you to list connected clients, browse your library sections and perform actions such as emptying trash. If you do not know the auth token required to access your Plex server, or simply want to access your server with your username and password, you can also create an PlexServer instance from MyPlexAccount.
+
+Parameters
+:
+baseurl (str) – Base url for to access the Plex Media Server (default: ‘http://localhost:32400’).
+
+token (str) – Required Plex authentication token to access the server.
+
+session (requests.Session, optional) – Use your own session object if you want to cache the http responses from the server.
+
+timeout (int, optional) – Timeout in seconds on initial connection to the server (default config.TIMEOUT).
+
+Variables
+:
+allowCameraUpload (bool) – True if server allows camera upload.
+
+allowChannelAccess (bool) – True if server allows channel access (iTunes?).
+
+allowMediaDeletion (bool) – True is server allows media to be deleted.
+
+allowSharing (bool) – True is server allows sharing.
+
+allowSync (bool) – True is server allows sync.
+
+backgroundProcessing (bool) – Unknown
+
+certificate (bool) – True if server has an HTTPS certificate.
+
+companionProxy (bool) – Unknown
+
+diagnostics (bool) – Unknown
+
+eventStream (bool) – Unknown
+
+friendlyName (str) – Human friendly name for this server.
+
+hubSearch (bool) – True if Hub Search is enabled. I believe this is enabled for everyone
+
+machineIdentifier (str) – Unique ID for this server (looks like an md5).
+
+multiuser (bool) – True if multiusers are enabled.
+
+myPlex (bool) – Unknown (True if logged into myPlex?).
+
+myPlexMappingState (str) – Unknown (ex: mapped).
+
+myPlexSigninState (str) – Unknown (ex: ok).
+
+myPlexSubscription (bool) – True if you have a myPlex subscription.
+
+myPlexUsername (str) – Email address if signed into myPlex (user@example.com)
+
+ownerFeatures (list) – List of features allowed by the server owner. This may be based on your PlexPass subscription. Features include: camera_upload, cloudsync, content_filter, dvr, hardware_transcoding, home, lyrics, music_videos, pass, photo_autotags, premium_music_metadata, session_bandwidth_restrictions, sync, trailers, webhooks (and maybe more).
+
+photoAutoTag (bool) – True if photo auto-tagging is enabled.
+
+platform (str) – Platform the server is hosted on (ex: Linux)
+
+platformVersion (str) – Platform version (ex: ‘6.1 (Build 7601)’, ‘4.4.0-59-generic’).
+
+pluginHost (bool) – Unknown
+
+readOnlyLibraries (bool) – Unknown
+
+requestParametersInCookie (bool) – Unknown
+
+streamingBrainVersion (bool) – Current Streaming Brain version.
+
+sync (bool) – True if syncing to a device is enabled.
+
+transcoderActiveVideoSessions (int) – Number of active video transcoding sessions.
+
+transcoderAudio (bool) – True if audio transcoding audio is available.
+
+transcoderLyrics (bool) – True if audio transcoding lyrics is available.
+
+transcoderPhoto (bool) – True if audio transcoding photos is available.
+
+transcoderSubtitles (bool) – True if audio transcoding subtitles is available.
+
+transcoderVideo (bool) – True if audio transcoding video is available.
+
+transcoderVideoBitrates (bool) – List of video bitrates.
+
+transcoderVideoQualities (bool) – List of video qualities.
+
+transcoderVideoResolutions (bool) – List of video resolutions.
+
+updatedAt (int) – Datetime the server was updated.
+
+updater (bool) – Unknown
+
+version (str) – Current Plex version (ex: 1.3.2.3112-1751929)
+
+voiceSearch (bool) – True if voice search is enabled. (is this Google Voice search?)
+
+_baseurl (str) – HTTP address of the client.
+
+_token (str) – Token used to access this client.
+
+_session (obj) – Requests session object used to access this client.
+
+propertylibrary
+Library to browse or search your media.
+
+ 
+propertysettings
+Returns a list of all server settings.
+
+identity()[source]
+Returns the Plex server identity.
+
+account()[source]
+Returns the Account object this server belongs to.
+
+claim(account)[source]
+Claim the Plex server using a MyPlexAccount. This will only work with an unclaimed server on localhost or the same subnet.
+
+Parameters
+:
+account (MyPlexAccount) – The account used to claim the server.
+
+unclaim()[source]
+Unclaim the Plex server. This will remove the server from your MyPlexAccount.
+
+propertyactivities
+Returns all current PMS activities.
+
+agents(mediaType=None)[source]
+Returns a list of Agent objects this server has available.
+
+createToken(type='delegation', scope='all')[source]
+Create a temp access token for the server.
+
+switchUser(user, session=None, timeout=None)[source]
+Returns a new PlexServer object logged in as the given username. Note: Only the admin account can switch to other users.
+
+Parameters
+:
+user (MyPlexUser or str) – MyPlexUser object, username, email, or user id of the user to log in to the server.
+
+session (requests.Session, optional) – Use your own session object if you want to cache the http responses from the server. This will default to the same session as the admin account if no new session is provided.
+
+timeout (int, optional) – Timeout in seconds on initial connection to the server. This will default to the same timeout as the admin account if no new timeout is provided.
+
+Example
+
+from plexapi.server import PlexServer
+# Login to the Plex server using the admin token
+plex = PlexServer('http://plexserver:32400', token='2ffLuB84dqLswk9skLos')
+# Login to the same Plex server using a different account
+userPlex = plex.switchUser("Username")
+systemAccounts()[source]
+Returns a list of SystemAccount objects this server contains.
+
+systemAccount(accountID)[source]
+Returns the SystemAccount object for the specified account ID.
+
+Parameters
+:
+accountID (int) – The SystemAccount ID.
+
+systemDevices()[source]
+Returns a list of SystemDevice objects this server contains.
+
+systemDevice(deviceID)[source]
+Returns the SystemDevice object for the specified device ID.
+
+Parameters
+:
+deviceID (int) – The SystemDevice ID.
+
+myPlexAccount()[source]
+Returns a MyPlexAccount object using the same token to access this server. If you are not the owner of this PlexServer you’re likely to receive an authentication error calling this.
+
+browse(path=None, includeFiles=True)[source]
+Browse the system file path using the Plex API. Returns list of Path and File objects.
+
+Parameters
+:
+path (Path or str, optional) – Full path to browse.
+
+includeFiles (bool) – True to include files when browsing (Default). False to only return folders.
+
+walk(path=None)[source]
+Walk the system file tree using the Plex API similar to os.walk. Yields a 3-tuple (path, paths, files) where path is a string of the directory path, paths is a list of Path objects, and files is a list of File objects.
+
+Parameters
+:
+path (Path or str, optional) – Full path to walk.
+
+isBrowsable(path)[source]
+Returns True if the Plex server can browse the given path.
+
+Parameters
+:
+path (Path or str) – Full path to browse.
+
+clients()[source]
+Returns list of all PlexClient objects connected to server.
+
+client(name)[source]
+Returns the PlexClient that matches the specified name or machine identifier.
+
+Parameters
+:
+name (str) – Name or machine identifier of the client to return.
+
+Raises
+:
+NotFound – Unknown client name.
+
+createCollection(title, section, items=None, smart=False, limit=None, libtype=None, sort=None, filters=None, **kwargs)[source]
+Creates and returns a new Collection.
+
+Parameters
+:
+title (str) – Title of the collection.
+
+section (LibrarySection, str) – The library section to create the collection in.
+
+items (List) – Regular collections only, list of Audio, Video, or Photo objects to be added to the collection.
+
+smart (bool) – True to create a smart collection. Default False.
+
+limit (int) – Smart collections only, limit the number of items in the collection.
+
+libtype (str) – Smart collections only, the specific type of content to filter (movie, show, season, episode, artist, album, track, photoalbum, photo).
+
+sort (str or list, optional) – Smart collections only, a string of comma separated sort fields or a list of sort fields in the format column:dir. See search() for more info.
+
+filters (dict) – Smart collections only, a dictionary of advanced filters. See search() for more info.
+
+**kwargs (dict) – Smart collections only, additional custom filters to apply to the search results. See search() for more info.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When no items are included to create the collection.
+
+plexapi.exceptions.BadRequest – When mixing media types in the collection.
+
+Returns
+:
+A new instance of the created Collection.
+
+Return type
+:
+Collection
+
+Example
+
+# Create a regular collection
+movies = plex.library.section("Movies")
+movie1 = movies.get("Big Buck Bunny")
+movie2 = movies.get("Sita Sings the Blues")
+collection = plex.createCollection(
+    title="Favorite Movies",
+    section=movies,
+    items=[movie1, movie2]
+)
+
+# Create a smart collection
+collection = plex.createCollection(
+    title="Recently Aired Comedy TV Shows",
+    section="TV Shows",
+    smart=True,
+    sort="episode.originallyAvailableAt:desc",
+    filters={"episode.originallyAvailableAt>>": "4w", "genre": "comedy"}
+)
+createPlaylist(title, section=None, items=None, smart=False, limit=None, libtype=None, sort=None, filters=None, m3ufilepath=None, **kwargs)[source]
+Creates and returns a new Playlist.
+
+Parameters
+:
+title (str) – Title of the playlist.
+
+section (LibrarySection, str) – Smart playlists and m3u import only, the library section to create the playlist in.
+
+items (List) – Regular playlists only, list of Audio, Video, or Photo objects to be added to the playlist.
+
+smart (bool) – True to create a smart playlist. Default False.
+
+limit (int) – Smart playlists only, limit the number of items in the playlist.
+
+libtype (str) – Smart playlists only, the specific type of content to filter (movie, show, season, episode, artist, album, track, photoalbum, photo).
+
+sort (str or list, optional) – Smart playlists only, a string of comma separated sort fields or a list of sort fields in the format column:dir. See search() for more info.
+
+filters (dict) – Smart playlists only, a dictionary of advanced filters. See search() for more info.
+
+m3ufilepath (str) – Music playlists only, the full file path to an m3u file to import. Note: This will overwrite any playlist previously created from the same m3u file.
+
+**kwargs (dict) – Smart playlists only, additional custom filters to apply to the search results. See search() for more info.
+
+Raises
+:
+plexapi.exceptions.BadRequest – When no items are included to create the playlist.
+
+plexapi.exceptions.BadRequest – When mixing media types in the playlist.
+
+plexapi.exceptions.BadRequest – When attempting to import m3u file into non-music library.
+
+plexapi.exceptions.BadRequest – When failed to import m3u file.
+
+Returns
+:
+A new instance of the created Playlist.
+
+Return type
+:
+Playlist
+
+Example
+
+# Create a regular playlist
+episodes = plex.library.section("TV Shows").get("Game of Thrones").episodes()
+playlist = plex.createPlaylist(
+    title="GoT Episodes",
+    items=episodes
+)
+
+# Create a smart playlist
+playlist = plex.createPlaylist(
+    title="Top 10 Unwatched Movies",
+    section="Movies",
+    smart=True,
+    limit=10,
+    sort="audienceRating:desc",
+    filters={"audienceRating>>": 8.0, "unwatched": True}
+)
+
+# Create a music playlist from an m3u file
+playlist = plex.createPlaylist(
+    title="Favorite Tracks",
+    section="Music",
+    m3ufilepath="/path/to/playlist.m3u"
+)
+createPlayQueue(item, **kwargs)[source]
+Creates and returns a new PlayQueue.
+
+Parameters
+:
+item (Media or Playlist) – Media or playlist to add to PlayQueue.
+
+kwargs (dict) – See ~plexapi.playqueue.PlayQueue.create.
+
+downloadDatabases(savepath=None, unpack=False, showstatus=False)[source]
+Download databases.
+
+Parameters
+:
+savepath (str) – Defaults to current working dir.
+
+unpack (bool) – Unpack the zip file.
+
+showstatus (bool) – Display a progressbar.
+
+downloadLogs(savepath=None, unpack=False, showstatus=False)[source]
+Download server logs.
+
+Parameters
+:
+savepath (str) – Defaults to current working dir.
+
+unpack (bool) – Unpack the zip file.
+
+showstatus (bool) – Display a progressbar.
+
+butlerTasks()[source]
+Return a list of ButlerTask objects.
+
+runButlerTask(task)[source]
+Manually run a butler task immediately instead of waiting for the scheduled task to run. Note: The butler task is run asynchronously. Check Plex Web to monitor activity.
+
+Parameters
+:
+task (str) – The name of the task to run. (e.g. ‘BackupDatabase’)
+
+Example
+
+availableTasks = [task.name for task in plex.butlerTasks()]
+print("Available butler tasks:", availableTasks)
+checkForUpdate(force=True, download=False)[source]
+Returns a Release object containing release info if an update is available or None if no update is available.
+
+Parameters
+:
+force (bool) – Force server to check for new releases
+
+download (bool) – Download if a update is available.
+
+isLatest()[source]
+Returns True if the installed version of Plex Media Server is the latest.
+
+canInstallUpdate()[source]
+Returns True if the newest version of Plex Media Server can be installed automatically. (e.g. Windows and Mac can install updates automatically, but Docker and NAS devices cannot.)
+
+installUpdate()[source]
+Automatically install the newest version of Plex Media Server.
+
+history(maxresults=None, mindate=None, ratingKey=None, accountID=None, librarySectionID=None)[source]
+Returns a list of media items from watched history. If there are many results, they will be fetched from the server in batches of X_PLEX_CONTAINER_SIZE amounts. If you’re only looking for the first <num> results, it would be wise to set the maxresults option to that amount so this functions doesn’t iterate over all results on the server.
+
+Parameters
+:
+maxresults (int) – Only return the specified number of results (optional).
+
+mindate (datetime) – Min datetime to return results from. This really helps speed up the result listing. For example: datetime.now() - timedelta(days=7)
+
+ratingKey (int/str)
+
+accountID (int/str)
+
+librarySectionID (int/str)
+
+playlists(playlistType=None, sectionId=None, title=None, sort=None, **kwargs)[source]
+Returns a list of all Playlist objects on the server.
+
+Parameters
+:
+playlistType (str, optional) – The type of playlists to return (audio, video, photo). Default returns all playlists.
+
+sectionId (int, optional) – The section ID (key) of the library to search within.
+
+title (str, optional) – General string query to search for. Partial string matches are allowed.
+
+sort (str or list, optional) – A string of comma separated sort fields in the format column:dir.
+
+playlist(title)[source]
+Returns the Playlist that matches the specified title.
+
+Parameters
+:
+title (str) – Title of the playlist to return.
+
+Raises
+:
+NotFound – Unable to find playlist.
+
+optimizedItems(removeAll=None)[source]
+Returns list of all Optimized objects connected to server.
+
+optimizedItem(optimizedID)[source]
+Returns single queued optimized item Video object. Allows for using optimized item ID to connect back to source item.
+
+conversions(pause=None)[source]
+Returns list of all Conversion objects connected to server.
+
+currentBackgroundProcess()[source]
+Returns list of all TranscodeJob objects running or paused on server.
+
+query(key, method=None, headers=None, params=None, timeout=None, **kwargs)[source]
+Main method used to handle HTTPS requests to the Plex server. This method helps by encoding the response to utf-8 and parsing the returned XML into and ElementTree object. Returns None if no data exists in the response.
+
+search(query, mediatype=None, limit=None, sectionId=None)[source]
+Returns a list of media items or filter categories from the resulting Hub Search against all items in your Plex library. This searches genres, actors, directors, playlists, as well as all the obvious media titles. It performs spell-checking against your search terms (because KUROSAWA is hard to spell). It also provides contextual search results. So for example, if you search for ‘Pernice’, it’ll return ‘Pernice Brothers’ as the artist result, but we’ll also go ahead and return your most-listened to albums and tracks from the artist. If you type ‘Arnold’ you’ll get a result for the actor, but also the most recently added movies he’s in.
+
+Parameters
+:
+query (str) – Query to use when searching your library.
+
+mediatype (str, optional) – Limit your search to the specified media type. actor, album, artist, autotag, collection, director, episode, game, genre, movie, photo, photoalbum, place, playlist, shared, show, tag, track
+
+limit (int, optional) – Limit to the specified number of results per Hub.
+
+sectionId (int, optional) – The section ID (key) of the library to search within.
+
+continueWatching()[source]
+Return a list of all items in the Continue Watching hub.
+
+sessions()[source]
+Returns a list of all active session (currently playing) media objects.
+
+transcodeSessions()[source]
+Returns a list of all active TranscodeSession objects.
+
+startAlertListener(callback=None, callbackError=None)[source]
+Creates a websocket connection to the Plex Server to optionally receive notifications. These often include messages from Plex about media scans as well as updates to currently running Transcode Sessions.
+
+Returns a new AlertListener object.
+
+Note: websocket-client must be installed in order to use this feature.
+
+>> pip install websocket-client
+Parameters
+:
+callback (func) – Callback function to call on received messages.
+
+callbackError (func) – Callback function to call on errors.
+
+Raises
+:
+Unsupported – Websocket-client not installed.
+
+transcodeImage(imageUrl, height, width, opacity=None, saturation=None, blur=None, background=None, blendColor=None, minSize=True, upscale=True, imageFormat=None)[source]
+Returns the URL for a transcoded image.
+
+Parameters
+:
+imageUrl (str) – The URL to the image (eg. returned by thumbUrl() or artUrl()). The URL can be an online image.
+
+height (int) – Height to transcode the image to.
+
+width (int) – Width to transcode the image to.
+
+opacity (int, optional) – Change the opacity of the image (0 to 100)
+
+saturation (int, optional) – Change the saturation of the image (0 to 100).
+
+blur (int, optional) – The blur to apply to the image in pixels (e.g. 3).
+
+background (str, optional) – The background hex colour to apply behind the opacity (e.g. ‘000000’).
+
+blendColor (str, optional) – The hex colour to blend the image with (e.g. ‘000000’).
+
+minSize (bool, optional) – Maintain smallest dimension. Default True.
+
+upscale (bool, optional) – Upscale the image if required. Default True.
+
+imageFormat (str, optional) – ‘jpeg’ (default) or ‘png’.
+
+url(key, includeToken=None)[source]
+Build a URL string with proper token argument. Token will be appended to the URL if either includeToken is True or CONFIG.log.show_secrets is ‘true’.
+
+refreshSynclist()[source]
+Force PMS to download new SyncList from Plex.tv.
+
+refreshContent()[source]
+Force PMS to refresh content for known SyncLists.
+
+refreshSync()[source]
+Calls refreshSynclist() and refreshContent(), just like the Plex Web UI does when you click ‘refresh’.
+
+bandwidth(timespan=None, **kwargs)[source]
+Returns a list of StatisticsBandwidth objects with the Plex server dashboard bandwidth data.
+
+Parameters
+:
+timespan (str, optional) – The timespan to bin the bandwidth data. Default is seconds. Available timespans: seconds, hours, days, weeks, months.
+
+**kwargs (dict, optional) –
+
+Any of the available filters that can be applied to the bandwidth data. The time frame (at) and bytes can also be filtered using less than or greater than (see examples below).
+
+accountID (int): The SystemAccount ID to filter.
+
+at (datetime): The time frame to filter (inclusive). The time frame can be either:
+An exact time frame (e.g. Only December 1st 2020 at=datetime(2020, 12, 1)).
+
+Before a specific time (e.g. Before and including December 2020 at<=datetime(2020, 12, 1)).
+
+After a specific time (e.g. After and including January 2021 at>=datetime(2021, 1, 1)).
+
+bytes (int): The amount of bytes to filter (inclusive). The bytes can be either:
+An exact number of bytes (not very useful) (e.g. bytes=1024**3).
+
+Less than or equal number of bytes (e.g. bytes<=1024**3).
+
+Greater than or equal number of bytes (e.g. bytes>=1024**3).
+
+deviceID (int): The SystemDevice ID to filter.
+
+lan (bool): True to only retrieve local bandwidth, False to only retrieve remote bandwidth.
+Default returns all local and remote bandwidth.
+
+Raises
+:
+BadRequest – When applying an invalid timespan or unknown filter.
+
+Example
+
+from plexapi.server import PlexServer
+plex = PlexServer('http://localhost:32400', token='xxxxxxxxxxxxxxxxxxxx')
+
+# Filter bandwidth data for December 2020 and later, and more than 1 GB used.
+filters = {
+    'at>': datetime(2020, 12, 1),
+    'bytes>': 1024**3
+}
+
+# Retrieve bandwidth data in one day timespans.
+bandwidthData = plex.bandwidth(timespan='days', **filters)
+
+# Print out bandwidth usage for each account and device combination.
+for bandwidth in sorted(bandwidthData, key=lambda x: x.at):
+    account = bandwidth.account()
+    device = bandwidth.device()
+    gigabytes = round(bandwidth.bytes / 1024**3, 3)
+    local = 'local' if bandwidth.lan else 'remote'
+    date = bandwidth.at.strftime('%Y-%m-%d')
+    print(f'{account.name} used {gigabytes} GB of {local} bandwidth on {date} from {device.name}')
+resources()[source]
+Returns a list of StatisticsResources objects with the Plex server dashboard resources data.
+
+getWebURL(base=None, playlistTab=None)[source]
+Returns the Plex Web URL for the server.
+
+Parameters
+:
+base (str) – The base URL before the fragment (#!). Default is https://app.plex.tv/desktop.
+
+playlistTab (str) – The playlist tab (audio, video, photo). Only used for the playlist URL.
+
+classplexapi.server.Account(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Contains the locally cached MyPlex account information. The properties provided don’t match the MyPlexAccount object very well. I believe this exists because access to myplex is not required to get basic plex information. I can’t imagine object is terribly useful except unless you were needed this information while offline.
+
+Parameters
+:
+server (PlexServer) – PlexServer this account is connected to (optional)
+
+data (ElementTree) – Response from PlexServer used to build this object (optional).
+
+Variables
+:
+authToken (str) – Plex authentication token to access the server.
+
+mappingError (str) – Unknown
+
+mappingErrorMessage (str) – Unknown
+
+mappingState (str) – Unknown
+
+privateAddress (str) – Local IP address of the Plex server.
+
+privatePort (str) – Local port of the Plex server.
+
+publicAddress (str) – Public IP address of the Plex server.
+
+publicPort (str) – Public port of the Plex server.
+
+signInState (str) – Signin state for this account (ex: ok).
+
+subscriptionActive (str) – True if the account subscription is active.
+
+subscriptionFeatures (str) – List of features allowed by the server for this account. This may be based on your PlexPass subscription. Features include: camera_upload, cloudsync, content_filter, dvr, hardware_transcoding, home, lyrics, music_videos, pass, photo_autotags, premium_music_metadata, session_bandwidth_restrictions, sync, trailers, webhooks’ (and maybe more).
+
+subscriptionState (str) – ‘Active’ if this subscription is active.
+
+username (str) – Plex account username (user@example.com).
+
+classplexapi.server.Activity(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+A currently running activity on the PlexServer.
+
+classplexapi.server.Release(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+classplexapi.server.SystemAccount(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single system account.
+
+Variables
+:
+TAG (str) – ‘Account’
+
+autoSelectAudio (bool) – True or False if the account has automatic audio language enabled.
+
+defaultAudioLanguage (str) – The default audio language code for the account.
+
+defaultSubtitleLanguage (str) – The default subtitle language code for the account.
+
+id (int) – The Plex account ID.
+
+key (str) – API URL (/accounts/<id>)
+
+name (str) – The username of the account.
+
+subtitleMode (bool) – The subtitle mode for the account.
+
+thumb (str) – URL for the account thumbnail.
+
+classplexapi.server.SystemDevice(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single system device.
+
+Variables
+:
+TAG (str) – ‘Device’
+
+clientIdentifier (str) – The unique identifier for the device.
+
+createdAt (datetime) – Datetime the device was created.
+
+id (int) – The ID of the device (not the same as MyPlexDevice ID).
+
+key (str) – API URL (/devices/<id>)
+
+name (str) – The name of the device.
+
+platform (str) – OS the device is running (Linux, Windows, Chrome, etc.)
+
+classplexapi.server.StatisticsBandwidth(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single statistics bandwidth data.
+
+Variables
+:
+TAG (str) – ‘StatisticsBandwidth’
+
+accountID (int) – The associated SystemAccount ID.
+
+at (datetime) – Datetime of the bandwidth data.
+
+bytes (int) – The total number of bytes for the specified time span.
+
+deviceID (int) – The associated SystemDevice ID.
+
+lan (bool) – True or False whether the bandwidth is local or remote.
+
+timespan (int) – The time span for the bandwidth data. 1: months, 2: weeks, 3: days, 4: hours, 6: seconds.
+
+account()[source]
+Returns the SystemAccount associated with the bandwidth data.
+
+device()[source]
+Returns the SystemDevice associated with the bandwidth data.
+
+classplexapi.server.StatisticsResources(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single statistics resources data.
+
+Variables
+:
+TAG (str) – ‘StatisticsResources’
+
+at (datetime) – Datetime of the resource data.
+
+hostCpuUtilization (float) – The system CPU usage %.
+
+hostMemoryUtilization (float) – The Plex Media Server CPU usage %.
+
+processCpuUtilization (float) – The system RAM usage %.
+
+processMemoryUtilization (float) – The Plex Media Server RAM usage %.
+
+timespan (int) – The time span for the resource data (6: seconds).
+
+classplexapi.server.ButlerTask(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a single scheduled butler task.
+
+Variables
+:
+TAG (str) – ‘ButlerTask’
+
+description (str) – The description of the task.
+
+enabled (bool) – Whether the task is enabled.
+
+interval (int) – The interval the task is run in days.
+
+name (str) – The name of the task.
+
+scheduleRandomized (bool) – Whether the task schedule is randomized.
+
+title (str) – The title of the task.
+
+classplexapi.server.Identity(server, data, initpath=None, parent=None)[source]
+Bases: PlexObject
+
+Represents a server identity.
+
+Variables
+:
+claimed (bool) – True or False if the server is claimed.
+
+machineIdentifier (str) – The Plex server machine identifier.
+

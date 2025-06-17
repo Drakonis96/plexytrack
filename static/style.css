@@ -71,6 +71,60 @@ body {
     color: #ffffff;
 }
 
+/* Users table */
+.user-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.user-table th,
+.user-table td {
+    padding: 8px;
+    border: 1px solid #ddd;
+}
+
+.user-table th {
+    background-color: #f2f2f2;
+    text-align: left;
+}
+
+.disabled {
+    color: #888;
+}
+
+/* Selected user highlighting */
+.selected-user {
+    background-color: #e8f4fd !important;
+    border-left: 4px solid #3498db;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-badge.owner {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.status-badge.available {
+    background-color: #27ae60;
+    color: white;
+}
+
+.status-badge.unavailable {
+    background-color: #95a5a6;
+    color: white;
+}
+
 /* Main Content Area */
 .content-area {
     padding: 30px;
