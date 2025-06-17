@@ -350,6 +350,16 @@
             if (!loadState()) {
                 updateStepVisuals();
             }
+
+            // Load server-side selected user if not in state
+            fetch('/api/selected_user')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.user_id && !selectedUser) {
+                        selectedUser = { id: data.user_id };
+                    }
+                })
+                .catch(() => {});
             
             // Add logout button event listener
             document.getElementById('logoutBtn').addEventListener('click', async function() {
@@ -582,7 +592,14 @@
         // Select user
         function selectUser(user) {
             selectedUser = user;
-            
+
+            // Persist selection server-side
+            fetch('/api/selected_user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: user.id })
+            }).catch(() => {});
+
             // Update visual selection
             document.querySelectorAll('.user-item').forEach(el => {
                 el.classList.remove('selected');

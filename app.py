@@ -60,6 +60,7 @@ from trakt_utils import (
     trakt_request,
     get_trakt_history,
     update_trakt,
+    update_trakt_for_managed_user,
     sync_collection,
     sync_ratings,
     sync_liked_lists,
@@ -80,6 +81,7 @@ from simkl_utils import (
     simkl_request,
     get_simkl_history,
     update_simkl,
+    update_simkl_for_managed_user,
     load_last_sync_date,
     save_last_sync_date,
     get_last_activity,
@@ -129,9 +131,11 @@ SYNC_WATCHLISTS = False
 LIVE_SYNC = False
 SYNC_PROVIDER = "none"  # trakt | simkl | none
 PROVIDER_FILE = "provider.json"
+SELECTED_USER_FILE = "selected_user.json"
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
 plex_account = None  # will hold MyPlexAccount instance
+SELECTED_USER_ID = None  # persisted selected Plex user id
 
 # --------------------------------------------------------------------------- #
 # TRAKT / SIMKL OAUTH CONSTANTS
@@ -167,6 +171,29 @@ def save_provider(provider: str) -> None:
             json.dump({"provider": provider}, f, indent=2)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save provider: %s", exc)
+
+
+def load_selected_user() -> None:
+    """Load selected Plex user ID from file."""
+    global SELECTED_USER_ID
+    if os.path.exists(SELECTED_USER_FILE):
+        try:
+            with open(SELECTED_USER_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            SELECTED_USER_ID = data.get("user_id")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load selected user: %s", exc)
+
+
+def save_selected_user(user_id: int) -> None:
+    """Persist selected Plex user ID to file."""
+    global SELECTED_USER_ID
+    SELECTED_USER_ID = user_id
+    try:
+        with open(SELECTED_USER_FILE, "w", encoding="utf-8") as f:
+            json.dump({"user_id": user_id}, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save selected user: %s", exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -1395,18 +1422,30 @@ def sync():
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
 
-    # Use new schema: get owner history via MyPlexAccount
+    # Determine which Plex user to sync
     account = get_plex_account()
     if account is None:
         logger.error("No Plex account available for sync")
         return
-        
-    plex_movies, plex_episodes = get_owner_plex_history(account)
-    logger.info(
-        "Found %d movies and %d episodes in owner Plex history.",
-        len(plex_movies),
-        len(plex_episodes),
-    )
+
+    load_selected_user()
+    target_user_id = SELECTED_USER_ID if SELECTED_USER_ID is not None else account.id
+
+    if target_user_id == account.id:
+        plex_movies, plex_episodes = get_owner_plex_history(account)
+        logger.info(
+            "Found %d movies and %d episodes in owner Plex history.",
+            len(plex_movies),
+            len(plex_episodes),
+        )
+    else:
+        plex_movies, plex_episodes = get_managed_user_plex_history(account, target_user_id)
+        logger.info(
+            "Found %d movies and %d episodes in Plex history for user %s.",
+            len(plex_movies),
+            len(plex_episodes),
+            target_user_id,
+        )
 
     try:
         if SYNC_PROVIDER == "trakt":
@@ -1465,7 +1504,10 @@ def sync():
 
             if SYNC_WATCHED:
                 try:
-                    update_trakt(headers, new_movies, new_episodes)
+                    if target_user_id == account.id:
+                        update_trakt(headers, new_movies, new_episodes)
+                    else:
+                        update_trakt_for_managed_user(headers, new_movies, new_episodes)
                 except Exception as exc:
                     logger.error("Failed updating Trakt history: %s", exc)
 
@@ -1479,10 +1521,11 @@ def sync():
                 for guid, (show, code, *_rest) in trakt_episodes.items()
                 if guid not in plex_episode_guids
             }
-            try:
-                update_plex(plex, missing_movies, missing_episodes)
-            except Exception as exc:
-                logger.error("Failed updating Plex history: %s", exc)
+            if target_user_id == account.id:
+                try:
+                    update_plex(plex, missing_movies, missing_episodes)
+                except Exception as exc:
+                    logger.error("Failed updating Plex history: %s", exc)
 
             if SYNC_LIKED_LISTS:
                 try:
@@ -1585,7 +1628,10 @@ def sync():
                 )
             
             if movies_to_add_fmt or episodes_to_add_fmt:
-                update_simkl(headers, movies_to_add_fmt, episodes_to_add_fmt)
+                if target_user_id == account.id:
+                    update_simkl(headers, movies_to_add_fmt, episodes_to_add_fmt)
+                else:
+                    update_simkl_for_managed_user(headers, movies_to_add_fmt, episodes_to_add_fmt)
 
             # Plex <- Simkl
             movies_to_add_plex = set(simkl_movies) - set(plex_movies)
@@ -1603,7 +1649,7 @@ def sync():
                 (simkl_episodes[e][0], simkl_episodes[e][1], e)
                 for e in episodes_to_add_plex
             }
-            if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
+            if target_user_id == account.id and (movies_to_add_plex_fmt or episodes_to_add_plex_fmt):
                 update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
 
             if current_activity:
@@ -2103,6 +2149,11 @@ def users_page():
                     logger.error("Failed to get myPlex users: %s", exc)
 
                 selected_id = request.args.get("user")
+                if not selected_id:
+                    load_selected_user()
+                    if SELECTED_USER_ID is not None:
+                        selected_id = str(SELECTED_USER_ID)
+
                 if selected_id:
                     try:
                         uid = int(selected_id)
@@ -2141,7 +2192,7 @@ def users_page():
         owner=owner,
         users=users,
         watch_counts=watch_counts,
-        selected_id=int(request.args.get("user")) if request.args.get("user") else None,
+        selected_id=int(selected_id) if selected_id else None,
     )
 
 
@@ -2485,6 +2536,24 @@ def logout():
     """Clear all session data and log out the user."""
     session.clear()
     return jsonify({"success": True, "message": "Successfully logged out"})
+
+
+@app.route("/api/selected_user", methods=["GET", "POST"])
+def api_selected_user():
+    """Get or set the selected Plex user for sync."""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        user_id = data.get("user_id")
+        try:
+            user_id_int = int(user_id)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid user ID"}), 400
+
+        save_selected_user(user_id_int)
+        return jsonify({"success": True})
+
+    load_selected_user()
+    return jsonify({"success": True, "user_id": SELECTED_USER_ID})
 
 
 # --------------------------------------------------------------------------- #
