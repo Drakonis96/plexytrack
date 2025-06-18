@@ -14,7 +14,6 @@ APP_VERSION = "v0.2.7"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 SIMKL_TOKEN_FILE = "simkl_tokens.json"
-SIMKL_LAST_SYNC_FILE = "simkl_last_sync.txt"
 
 
 def load_simkl_tokens() -> None:
@@ -39,37 +38,6 @@ def save_simkl_token(access_token: str) -> None:
         logger.error("Failed to save Simkl token: %s", exc)
 
 
-def load_last_sync_date() -> Optional[str]:
-    """Return the stored last sync date for Simkl."""
-    if os.path.exists(SIMKL_LAST_SYNC_FILE):
-        try:
-            with open(SIMKL_LAST_SYNC_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip() or None
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to load Simkl last sync date: %s", exc)
-    return None
-
-
-def save_last_sync_date(date_str: str) -> None:
-    """Persist ``date_str`` to :data:`SIMKL_LAST_SYNC_FILE`."""
-    try:
-        with open(SIMKL_LAST_SYNC_FILE, "w", encoding="utf-8") as f:
-            f.write(date_str)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to save Simkl last sync date: %s", exc)
-
-
-def get_last_activity(headers: dict) -> Optional[str]:
-    """Return the latest ``all`` activity timestamp from Simkl."""
-    try:
-        resp = simkl_request("POST", "/sync/activities", headers)
-        data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to retrieve Simkl activities: %s", exc)
-        return None
-    if isinstance(data, dict):
-        return data.get("all")
-    return None
 
 
 def exchange_code_for_simkl_tokens(code: str, redirect_uri: str) -> Optional[dict]:
