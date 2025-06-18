@@ -260,16 +260,6 @@
                     </div>
                 </div>
 
-                <!-- Step 4: History Display -->
-                <div class="step-container" id="step4" data-step="4">
-                    <div class="step-header">
-                        <div class="step-number">4</div>
-                        <div class="step-title">User Statistics & History</div>
-                    </div>
-                    <div id="historyContent" class="history-section">
-                        <p>Please select a user first to see their viewing statistics and history.</p>
-                    </div>
-                </div>
             </section>
         </main>
 
@@ -338,9 +328,6 @@
                     if (currentStep >= 3 && selectedServer && authToken) {
                         setTimeout(() => loadUsers(), 200);
                     }
-                    if (currentStep >= 4 && selectedUser && authToken) {
-                        setTimeout(() => loadUserStatsAndHistory(), 300);
-                    }
                     
                     return true;
                 } catch (e) {
@@ -370,7 +357,6 @@
             updateStepVisuals();
             document.getElementById('serverList').innerHTML = '<p>Please authenticate first to see available servers.</p>';
             document.getElementById('userList').innerHTML = '<p>Please select a server first to see available users.</p>';
-            document.getElementById('historyContent').innerHTML = '<p>Please select a user first to see their viewing statistics and history.</p>';
             
             // Clear any error/success messages
             document.getElementById('authError').style.display = 'none';
@@ -430,10 +416,10 @@
 
         // Update step visual states
         function updateStepVisuals() {
-            for (let i = 1; i <= 4; i++) {
+            for (let i = 1; i <= 3; i++) {
                 const stepEl = document.getElementById(`step${i}`);
                 stepEl.classList.remove('active', 'completed');
-                
+
                 if (i < currentStep) {
                     stepEl.classList.add('completed');
                 } else if (i === currentStep) {
@@ -654,22 +640,20 @@
             }
         }
 
-        // Select user for viewing history (existing function)
+        // Select user by clicking on the row
         function selectUser(user) {
             selectedUser = user;
-            
-            // Update visual selection
+
+            // Highlight selection
             document.querySelectorAll('.user-item').forEach(el => {
                 el.classList.remove('selected');
             });
             event.target.closest('.user-item').classList.add('selected');
-            
-            currentStep = 4;
-            updateStepVisuals();
-            saveState(); // Save state after user selection
-            
-            // Immediately load both stats and history when user is selected
-            loadUserStatsAndHistory();
+
+            saveState();
+
+            // Trigger the same action as the "Select for Sync" button
+            selectForSync(user);
         }
 
         // Step 4: Load user stats and history automatically
