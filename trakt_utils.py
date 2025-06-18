@@ -16,7 +16,6 @@ APP_VERSION = "v0.2.7"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 TOKEN_FILE = "trakt_tokens.json"
-TRAKT_LAST_SYNC_FILE = "trakt_last_sync.txt"
 
 
 def load_trakt_tokens() -> None:
@@ -42,37 +41,6 @@ def save_trakt_tokens(access_token: str, refresh_token: Optional[str]) -> None:
         logger.error("Failed to save Trakt tokens: %s", exc)
 
 
-def load_trakt_last_sync_date() -> Optional[str]:
-    """Return the stored last sync date for Trakt."""
-    if os.path.exists(TRAKT_LAST_SYNC_FILE):
-        try:
-            with open(TRAKT_LAST_SYNC_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip() or None
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to load Trakt last sync date: %s", exc)
-    return None
-
-
-def save_trakt_last_sync_date(date_str: str) -> None:
-    """Persist ``date_str`` to :data:`TRAKT_LAST_SYNC_FILE`."""
-    try:
-        with open(TRAKT_LAST_SYNC_FILE, "w", encoding="utf-8") as f:
-            f.write(date_str)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to save Trakt last sync date: %s", exc)
-
-
-def get_trakt_last_activity(headers: dict) -> Optional[str]:
-    """Return the latest ``all`` activity timestamp from Trakt."""
-    try:
-        resp = trakt_request("GET", "/sync/last_activities", headers)
-        data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to retrieve Trakt last activities: %s", exc)
-        return None
-    if isinstance(data, dict):
-        return data.get("all")
-    return None
 
 
 def get_trakt_redirect_uri() -> str:

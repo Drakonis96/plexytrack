@@ -161,36 +161,11 @@ docker-compose -f docker-compose-local.yml up --build
 
 That's it! The container will continue to sync your Plex account with Trakt and/or Simkl according to the interval you set.
 
-## User Selection and Timestamp Reset
+## User Selection
 
-When using PlexyTrack with multiple Plex users (owner and managed users), you can select which user's viewing history to synchronize. An important feature of user selection is **automatic timestamp reset**.
+When using PlexyTrack with multiple Plex users (owner and managed users), you can choose which user's viewing history to synchronize.
 
-### How Timestamp Reset Works
-
-When you click the **"Select for Sync"** button for any user, PlexyTrack automatically:
-
-1. **Resets sync timestamps** - Clears Trakt and Simkl timestamp files
-2. **Prevents cross-user data pollution** - Ensures that timestamps from a previous user don't affect the new user's sync
-3. **Forces a clean sync state** - The next synchronization will be a full sync rather than incremental
-
-### Why This Matters
-
-Without timestamp reset, switching between users could result in:
-- Incomplete synchronization due to old timestamps
-- Missing recently watched content 
-- Incorrect incremental sync behavior for Trakt/Simkl
-- Data inconsistencies between services
-
-### User Interface
-
-After selecting a user, you'll see a confirmation message indicating:
-- The user has been selected successfully
-- Which timestamp files were reset (Trakt, Simkl)
-- Confirmation that the next sync will have a clean state
-
-This ensures that each user's viewing history is synchronized accurately and completely, regardless of previous sync operations performed for other users.
-
-**Note**: Plex always performs full sync to ensure complete data integrity and reliable episode detection, while Trakt and Simkl use incremental sync for efficiency.
+After selecting a user, you'll see a confirmation message indicating that the user was selected successfully. Each user's history is synchronized independently and always with a **full sync** to ensure complete data integrity across Plex, Trakt and Simkl.
 
 ## Screenshots
 

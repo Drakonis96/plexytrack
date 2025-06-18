@@ -69,9 +69,6 @@ from trakt_utils import (
     fetch_trakt_ratings,
     fetch_trakt_watchlist,
     restore_backup,
-    load_trakt_last_sync_date,
-    save_trakt_last_sync_date,
-    get_trakt_last_activity,
 )
 from simkl_utils import (
     load_simkl_tokens,
@@ -80,9 +77,6 @@ from simkl_utils import (
     simkl_request,
     get_simkl_history,
     update_simkl,
-    load_last_sync_date,
-    save_last_sync_date,
-    get_last_activity,
 )
 
 # --------------------------------------------------------------------------- #
@@ -1945,19 +1939,11 @@ def sync():
     try:
         if SYNC_PROVIDER == "trakt":
             logger.info("Provider: Trakt")
-            last_sync = load_trakt_last_sync_date()
-            current_activity = get_trakt_last_activity(headers)
-            if last_sync and current_activity and current_activity == last_sync:
-                logger.info("No new Trakt activity since %s", last_sync)
+            try:
+                trakt_movies, trakt_episodes = get_trakt_history(headers)
+            except Exception as exc:
+                logger.error("Failed to retrieve Trakt history: %s", exc)
                 trakt_movies, trakt_episodes = {}, {}
-            else:
-                try:
-                    trakt_movies, trakt_episodes = get_trakt_history(
-                        headers, date_from=last_sync
-                    )
-                except Exception as exc:
-                    logger.error("Failed to retrieve Trakt history: %s", exc)
-                    trakt_movies, trakt_episodes = {}, {}
             
             # Always do full sync with Plex - get all history without date filtering
             plex_movies, plex_episodes = get_selected_user_history()
@@ -2084,25 +2070,14 @@ def sync():
                 except Exception as exc:
                     logger.error("Watchlist sync failed: %s", exc)
 
-            if current_activity:
-                save_trakt_last_sync_date(current_activity)
-
         elif SYNC_PROVIDER == "simkl":
             logger.info("Provider: Simkl")
-            last_sync = load_last_sync_date()
-            current_activity = get_last_activity(headers)
-            if last_sync and current_activity and current_activity == last_sync:
-                logger.info("No new Simkl activity since %s", last_sync)
-                simkl_movies, simkl_episodes = {}, {}
-            else:
-                simkl_movies, simkl_episodes = get_simkl_history(
-                    headers, date_from=last_sync
-                )
-                logger.info(
-                    "Retrieved %d movies and %d episodes from Simkl",
-                    len(simkl_movies),
-                    len(simkl_episodes),
-                )
+            simkl_movies, simkl_episodes = get_simkl_history(headers)
+            logger.info(
+                "Retrieved %d movies and %d episodes from Simkl",
+                len(simkl_movies),
+                len(simkl_episodes),
+            )
             
             # Always do full sync with Plex - get all history without date filtering
             plex_movies, plex_episodes = get_selected_user_history()
@@ -2188,8 +2163,7 @@ def sync():
                     logger.info("Skipping bidirectional sync for managed user %s: %d movies and %d episodes would have been synced from Simkl to Plex", 
                                selected_user["username"], len(movies_to_add_plex), len(episodes_to_add_plex))
 
-            if current_activity:
-                save_last_sync_date(current_activity)
+
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Error during sync: %s", exc)
@@ -2587,28 +2561,6 @@ def stop():
         url_for("index", message="Sync stopped successfully!", mtype="stopped")
     )
 
-
-@app.route("/reset_timestamps", methods=["POST"])
-def reset_timestamps():
-    """Reset sync timestamps to force a full sync on next run."""
-    try:
-        timestamps_reset = reset_sync_timestamps()
-        
-        if timestamps_reset:
-            message = f"Timestamps reset for {', '.join(timestamps_reset)}. Next sync will be a full sync."
-        else:
-            message = "No timestamps found to reset."
-            
-        logger.info("Timestamps reset by user. Files removed: %s", timestamps_reset)
-        
-        return redirect(
-            url_for("index", message=message, mtype="success")
-        )
-    except Exception as exc:
-        logger.error("Failed to reset timestamps: %s", exc)
-        return redirect(
-            url_for("index", message="Failed to reset timestamps. Check logs for details.", mtype="error")
-        )
 
 
 @app.route("/backup")
@@ -3501,35 +3453,7 @@ def mark_as_watched_for_user(item_guid, item_type, user_data):
         logger.error("Failed to mark as watched: %s", exc)
         return False
 
-def reset_sync_timestamps():
-    """Reset sync timestamps to ensure clean state when switching users."""
-    try:
-        # Import the timestamp file constants
-        from trakt_utils import TRAKT_LAST_SYNC_FILE
-        from simkl_utils import SIMKL_LAST_SYNC_FILE
-        from plex_utils import PLEX_LAST_SYNC_FILE
-        
-        # Remove timestamp files if they exist
-        timestamps_reset = []
-        
-        if os.path.exists(TRAKT_LAST_SYNC_FILE):
-            os.remove(TRAKT_LAST_SYNC_FILE)
-            timestamps_reset.append("Trakt")
-            
-        if os.path.exists(SIMKL_LAST_SYNC_FILE):
-            os.remove(SIMKL_LAST_SYNC_FILE)
-            timestamps_reset.append("Simkl")
-            
-        if os.path.exists(PLEX_LAST_SYNC_FILE):
-            os.remove(PLEX_LAST_SYNC_FILE)
-            timestamps_reset.append("Plex")
-        
-        logger.info("Sync timestamps reset for user switch. Files removed: %s", timestamps_reset)
-        return timestamps_reset
-        
-    except Exception as exc:
-        logger.error("Failed to reset sync timestamps: %s", exc)
-        return []
+
 
 @app.route("/api/select_user", methods=["POST"])
 def select_user():
@@ -3553,16 +3477,8 @@ def select_user():
         }
         
         if save_selected_user(user_data):
-            # Reset sync timestamps to prevent cross-user timestamp pollution
-            timestamps_reset = reset_sync_timestamps()
-            
             logger.info("Selected user for sync: %s (%s)", username, role)
-            
-            # Provide informative message about timestamp reset
             message = f"Selected {username} for sync"
-            if timestamps_reset:
-                message += f". Sync timestamps reset for clean state ({', '.join(timestamps_reset)})"
-            
             return jsonify({"success": True, "message": message})
         else:
             return jsonify({"success": False, "error": "Failed to save user selection"})

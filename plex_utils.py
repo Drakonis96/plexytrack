@@ -840,54 +840,6 @@ def update_plex(
     else:
         logger.info("Nothing new to send to Plex.")
 
-# --------------------------------------------------------------------------- #
-# PLEX SYNC TIMESTAMP MANAGEMENT
-# --------------------------------------------------------------------------- #
-
-PLEX_LAST_SYNC_FILE = "plex_last_sync.txt"
-
-def load_plex_last_sync_date() -> Optional[str]:
-    """Return the stored last sync date for Plex."""
-    if os.path.exists(PLEX_LAST_SYNC_FILE):
-        try:
-            with open(PLEX_LAST_SYNC_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip() or None
-        except Exception as exc:
-            logger.error("Failed to load Plex last sync date: %s", exc)
-    return None
-
-
-def save_plex_last_sync_date(date_str: str) -> None:
-    """Persist ``date_str`` to :data:`PLEX_LAST_SYNC_FILE`."""
-    try:
-        with open(PLEX_LAST_SYNC_FILE, "w", encoding="utf-8") as f:
-            f.write(date_str)
-        logger.info("Saved Plex last sync date: %s", date_str)
-    except Exception as exc:
-        logger.error("Failed to save Plex last sync date: %s", exc)
-
-
-def get_plex_latest_activity_timestamp(movies: Dict[str, Dict[str, Optional[str]]], 
-                                      episodes: Dict[str, Dict[str, Optional[str]]]) -> Optional[str]:
-    """
-    Get the latest activity timestamp from Plex history data.
-    This finds the most recent 'watched_at' timestamp from all items.
-    """
-    latest_timestamp = None
-    
-    # Check movies
-    for movie_data in movies.values():
-        watched_at = movie_data.get("watched_at")
-        if watched_at and (not latest_timestamp or watched_at > latest_timestamp):
-            latest_timestamp = watched_at
-    
-    # Check episodes
-    for episode_data in episodes.values():
-        watched_at = episode_data.get("watched_at")
-        if watched_at and (not latest_timestamp or watched_at > latest_timestamp):
-            latest_timestamp = watched_at
-    
-    return latest_timestamp
 
 def get_cached_ratings(plex) -> Dict[str, Dict[str, float]]:
     """
