@@ -123,6 +123,7 @@ def imdb_guid(item) -> Optional[str]:
             if val and val.startswith("tmdb://"):
                 return val
         for g in guids:
+            val = _parse_guid_value(g.id)
             if val and val.startswith("tvdb://"):
                 return val
         for g in getattr(item, "guids", []) or []:
