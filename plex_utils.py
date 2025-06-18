@@ -230,8 +230,12 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
                                 else:
                                     # Manually marked as watched but no history entry
-                                    # Use dateAdded or updatedAt as fallback timestamp
-                                    fallback_date = getattr(movie, 'updatedAt', None) or getattr(movie, 'addedAt', None)
+                                    # Use lastViewedAt, updatedAt or addedAt as fallback timestamp
+                                    fallback_date = (
+                                        getattr(movie, 'lastViewedAt', None)
+                                        or getattr(movie, 'updatedAt', None)
+                                        or getattr(movie, 'addedAt', None)
+                                    )
                                     watched_at = to_iso_z(fallback_date)
                                 movies[guid] = {
                                     "title": title,
@@ -265,8 +269,12 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
                                 else:
                                     # Manually marked as watched but no history entry
-                                    # Use dateAdded or updatedAt as fallback timestamp
-                                    fallback_date = getattr(episode, 'updatedAt', None) or getattr(episode, 'addedAt', None)
+                                    # Use lastViewedAt, updatedAt or addedAt as fallback timestamp
+                                    fallback_date = (
+                                        getattr(episode, 'lastViewedAt', None)
+                                        or getattr(episode, 'updatedAt', None)
+                                        or getattr(episode, 'addedAt', None)
+                                    )
                                     watched_at = to_iso_z(fallback_date)
                                 episodes[guid] = {
                                     "show": show_title,
@@ -454,7 +462,11 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
                                     
                                     # If no timestamp in history, use fallback
                                     if not watched_at:
-                                        fallback_date = getattr(movie, 'updatedAt', None) or getattr(movie, 'addedAt', None)
+                                        fallback_date = (
+                                            getattr(movie, 'lastViewedAt', None)
+                                            or getattr(movie, 'updatedAt', None)
+                                            or getattr(movie, 'addedAt', None)
+                                        )
                                         watched_at = to_iso_z(fallback_date)
                                         logger.debug("Added manually marked movie with fallback timestamp - Movie: %s (%s)", title, year)
                                     else:
@@ -504,7 +516,11 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
                                     
                                     # If no timestamp in history, use fallback
                                     if not watched_at:
-                                        fallback_date = getattr(episode, 'updatedAt', None) or getattr(episode, 'addedAt', None)
+                                        fallback_date = (
+                                            getattr(episode, 'lastViewedAt', None)
+                                            or getattr(episode, 'updatedAt', None)
+                                            or getattr(episode, 'addedAt', None)
+                                        )
                                         watched_at = to_iso_z(fallback_date)
                                         logger.debug("Added manually marked episode with fallback timestamp - Episode: %s %s", show_title, code)
                                     else:

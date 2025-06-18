@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def to_iso_z(value) -> Optional[str]:
     """Convert any ``viewedAt`` variant to ISO-8601 UTC ("...Z")."""
-    if value is None:
+    if value is None or value == 0 or value == "0":
         return None
 
     if isinstance(value, datetime):
