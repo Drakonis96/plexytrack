@@ -1946,8 +1946,8 @@ def sync():
         if SYNC_PROVIDER == "trakt":
             logger.info("Provider: Trakt")
             last_sync = load_trakt_last_sync_date()
-            current_activity = get_trakt_last_activity(headers)
-            if last_sync and current_activity and current_activity == last_sync:
+            current_activity_before = get_trakt_last_activity(headers)
+            if last_sync and current_activity_before and current_activity_before == last_sync:
                 logger.info("No new Trakt activity since %s", last_sync)
                 trakt_movies, trakt_episodes = {}, {}
             else:
@@ -2084,14 +2084,17 @@ def sync():
                 except Exception as exc:
                     logger.error("Watchlist sync failed: %s", exc)
 
-            if current_activity:
-                save_trakt_last_sync_date(current_activity)
+            current_activity_after = get_trakt_last_activity(headers)
+            if current_activity_after:
+                save_trakt_last_sync_date(current_activity_after)
+            elif current_activity_before:
+                save_trakt_last_sync_date(current_activity_before)
 
         elif SYNC_PROVIDER == "simkl":
             logger.info("Provider: Simkl")
             last_sync = load_last_sync_date()
-            current_activity = get_last_activity(headers)
-            if last_sync and current_activity and current_activity == last_sync:
+            current_activity_before = get_last_activity(headers)
+            if last_sync and current_activity_before and current_activity_before == last_sync:
                 logger.info("No new Simkl activity since %s", last_sync)
                 simkl_movies, simkl_episodes = {}, {}
             else:
@@ -2188,8 +2191,11 @@ def sync():
                     logger.info("Skipping bidirectional sync for managed user %s: %d movies and %d episodes would have been synced from Simkl to Plex", 
                                selected_user["username"], len(movies_to_add_plex), len(episodes_to_add_plex))
 
-            if current_activity:
-                save_last_sync_date(current_activity)
+            current_activity_after = get_last_activity(headers)
+            if current_activity_after:
+                save_last_sync_date(current_activity_after)
+            elif current_activity_before:
+                save_last_sync_date(current_activity_before)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Error during sync: %s", exc)
