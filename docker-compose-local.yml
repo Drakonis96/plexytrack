@@ -1,20 +1,14 @@
-version: '3'
 services:
   app:
     build: .
     ports:
       - "5030:5030"
-    env_file:
-      - .env
-    environment:
-      - TZ=${TZ:-Europe/Madrid}
-      - PLEX_BASEURL=${PLEX_BASEURL}
-      - PLEX_TOKEN=${PLEX_TOKEN}
-      - TRAKT_CLIENT_ID=${TRAKT_CLIENT_ID}
-      - TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET}
-      - SIMKL_CLIENT_ID=${SIMKL_CLIENT_ID}
-      - SIMKL_CLIENT_SECRET=${SIMKL_CLIENT_SECRET}
-      # Optional custom redirect URIs
-      - TRAKT_REDIRECT_URI=${TRAKT_REDIRECT_URI:-}
-      - SIMKL_REDIRECT_URI=${SIMKL_REDIRECT_URI:-}
 
+    environment:
+      - TZ=Europe/Madrid
+      - PLEX_BASEURL=192.168.68.120:32400
+
+      - TRAKT_CLIENT_ID=201c17e5507ab2712194f56fe949f0e4934416fbcb1bfb3ed5c584ec019583ae
+      - TRAKT_CLIENT_SECRET=60e9afba0f8cce7053647c0742b378f142588e6c4eedfeba2eb66e309784f0e6
+      - SIMKL_CLIENT_ID=ea3cb3f867abe390e8c85d44176cd4b7747a14086dbc6084062c7247ef25dcbd
+      - SIMKL_CLIENT_SECRET=3f9f00b3f16158796210aedcdaaf5028cdadec2fb8005a81428bca64b9210487

@@ -262,3 +262,175 @@ def update_simkl(headers: dict, movies: List[Tuple[str, Optional[int], Optional[
         logger.info("Simkl history updated successfully.")
     except requests.exceptions.RequestException as e:
         logger.error("Failed to update Simkl: %s", e)
+
+
+def scrobble_item_to_simkl(headers: dict, item_data: dict, progress: float = 100.0) -> bool:
+    """
+    Scrobble an item to Simkl using the scrobble endpoint.
+    This is used for managed users where we want to mark items as watched.
+    
+    Args:
+        headers: Simkl API headers
+        item_data: Dict containing item info (title, year, ids, etc.)
+        progress: Progress percentage (default 100.0 to mark as watched)
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Use scrobble endpoint with 100% progress to mark as watched
+        payload = {
+            "progress": progress
+        }
+        
+        if item_data.get("type") == "movie":
+            payload["movie"] = {
+                "title": item_data.get("title"),
+                "year": item_data.get("year"),
+                "ids": item_data.get("ids", {})
+            }
+        elif item_data.get("type") == "episode":
+            payload["episode"] = {
+                "title": item_data.get("episode_title", ""),
+                "season": item_data.get("season"),
+                "number": item_data.get("episode"),
+                "ids": item_data.get("episode_ids", {})
+            }
+            if item_data.get("show_ids") or item_data.get("show_title"):
+                payload["show"] = {
+                    "title": item_data.get("show_title"),
+                    "year": item_data.get("show_year"),
+                    "ids": item_data.get("show_ids", {})
+                }
+        
+        # Try scrobble/stop endpoint first, fall back to adding to history
+        try:
+            resp = simkl_request("post", "/scrobble/stop", headers, json=payload)
+            if resp.status_code in (200, 201):
+                logger.info("Successfully scrobbled %s to Simkl", item_data.get("title", "item"))
+                return True
+        except Exception:
+            # If scrobble fails, try adding directly to history
+            pass
+        
+        # Fallback: Add to watched history directly
+        history_payload = {}
+        if item_data.get("type") == "movie":
+            history_payload["movies"] = [{
+                "title": item_data.get("title"),
+                "year": item_data.get("year"),
+                "ids": item_data.get("ids", {}),
+                "watched_at": item_data.get("watched_at")
+            }]
+        elif item_data.get("type") == "episode":
+            show_data = {
+                "title": item_data.get("show_title"),
+                "ids": item_data.get("show_ids", {}),
+                "seasons": [{
+                    "number": item_data.get("season"),
+                    "episodes": [{
+                        "number": item_data.get("episode"),
+                        "watched_at": item_data.get("watched_at")
+                    }]
+                }]
+            }
+            if item_data.get("show_year"):
+                show_data["year"] = item_data.get("show_year")
+            history_payload["shows"] = [show_data]
+        
+        resp = simkl_request("post", "/sync/history", headers, json=history_payload)
+        if resp.status_code in (200, 201):
+            logger.info("Successfully added %s to Simkl history", item_data.get("title", "item"))
+            return True
+        else:
+            logger.error("Failed to add %s to Simkl: HTTP %d", item_data.get("title", "item"), resp.status_code)
+            return False
+            
+    except Exception as exc:
+        logger.error("Error scrobbling %s to Simkl: %s", item_data.get("title", "item"), exc)
+        return False
+
+
+def update_simkl_for_managed_user(headers: dict, movies: list, episodes: list) -> None:
+    """
+    Update Simkl for a managed user using scrobble/history endpoints.
+    This marks items as watched by scrobbling them or adding to history.
+    
+    Args:
+        headers: Simkl API headers  
+        movies: List of movie data (title, year, guid, watched_at)
+        episodes: List of episode data (show_title, code, guid, watched_at)
+    """
+    logger.info("Syncing %d movies and %d episodes to Simkl for managed user", 
+                len(movies), len(episodes))
+    
+    synced_movies = 0
+    synced_episodes = 0
+    
+    # Sync movies
+    for title, year, guid, watched_at in movies:
+        if not guid:
+            continue
+            
+        # Get IDs from GUID
+        ids = guid_to_ids(guid)
+        
+        item_data = {
+            "type": "movie",
+            "title": title,
+            "year": year,
+            "ids": ids,
+            "watched_at": watched_at
+        }
+        
+        if scrobble_item_to_simkl(headers, item_data):
+            synced_movies += 1
+    
+    # Sync episodes
+    for show_title, code, guid, watched_at in episodes:
+        if not guid:
+            continue
+            
+        # Parse season/episode from code (format: S01E01)
+        try:
+            season_match = code.split("S")[1].split("E")[0]
+            episode_match = code.split("E")[1]
+            season_num = int(season_match)
+            episode_num = int(episode_match)
+        except (IndexError, ValueError):
+            logger.warning("Invalid episode code format: %s", code)
+            continue
+            
+        # For episodes, we need show IDs - try to get them from the library
+        show_ids = {}
+        try:
+            from app import get_plex_server
+            from utils import get_show_from_library, imdb_guid, best_guid
+            plex_server = get_plex_server()
+            if plex_server:
+                show_obj = get_show_from_library(plex_server, show_title)
+                if show_obj:
+                    show_guid = imdb_guid(show_obj) or best_guid(show_obj)
+                    if show_guid:
+                        show_ids = guid_to_ids(show_guid)
+        except Exception as exc:
+            logger.debug("Could not get show IDs for %s: %s", show_title, exc)
+        
+        # Episode IDs from the episode GUID
+        episode_ids = guid_to_ids(guid)
+        
+        item_data = {
+            "type": "episode", 
+            "show_title": show_title,
+            "show_ids": show_ids,
+            "season": season_num,
+            "episode": episode_num,
+            "episode_ids": episode_ids,
+            "watched_at": watched_at
+        }
+        
+        if scrobble_item_to_simkl(headers, item_data):
+            synced_episodes += 1
+    
+    logger.info("Successfully synced %d movies and %d episodes to Simkl", 
+                synced_movies, synced_episodes)
