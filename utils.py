@@ -123,6 +123,7 @@ def imdb_guid(item) -> Optional[str]:
             if val and val.startswith("tmdb://"):
                 return val
         for g in guids:
+            val = _parse_guid_value(g.id)
             if val and val.startswith("tvdb://"):
                 return val
         for g in getattr(item, "guids", []) or []:
@@ -165,9 +166,36 @@ def get_show_from_library(plex, title):
     return None
 
 
+# Cache for library sections to avoid repeated API calls
+_cached_sections = {}
+_cached_sections_timestamp = {}
+SECTION_CACHE_DURATION = 600  # 10 minutes
+
+def reset_sections_cache():
+    """Reset the library sections cache"""
+    global _cached_sections, _cached_sections_timestamp
+    _cached_sections.clear()
+    _cached_sections_timestamp.clear()
+
 def find_item_by_guid(plex, guid):
     """Return a movie or show from Plex matching the given GUID."""
-    for sec in plex.library.sections():
+    import time
+    
+    # Get cached sections for this plex server
+    server_key = getattr(plex, 'machineIdentifier', 'default')
+    current_time = time.time()
+    
+    if (server_key not in _cached_sections or 
+        server_key not in _cached_sections_timestamp or
+        current_time - _cached_sections_timestamp[server_key] > SECTION_CACHE_DURATION):
+        
+        _cached_sections[server_key] = list(plex.library.sections())
+        _cached_sections_timestamp[server_key] = current_time
+    
+    sections = _cached_sections[server_key]
+    
+    # Search in cached sections
+    for sec in sections:
         if sec.type in ("movie", "show"):
             try:
                 return sec.getGuid(guid)
@@ -293,3 +321,38 @@ def simkl_episode_key(show: dict, e: dict) -> Optional[Union[str, Tuple[str, str
     if base_guid:
         return (base_guid, code)
     return (show.get("title", "").lower(), code)
+
+def safe_timestamp_compare(timestamp1: Optional[str], timestamp2: Optional[str]) -> bool:
+    """
+    Safely compare two ISO timestamp strings.
+    
+    Returns True if timestamp1 > timestamp2, False otherwise.
+    Handles different timestamp formats (with/without milliseconds, different timezone formats).
+    
+    Args:
+        timestamp1: First timestamp (e.g., watched_at)
+        timestamp2: Second timestamp (e.g., last_sync)
+        
+    Returns:
+        bool: True if timestamp1 is newer than timestamp2
+    """
+    if not timestamp1 or not timestamp2:
+        return False
+        
+    try:
+        # Parse both timestamps to datetime objects
+        def parse_iso_timestamp(ts: str) -> datetime:
+            # Handle Z suffix (UTC)
+            if ts.endswith('Z'):
+                ts = ts[:-1] + '+00:00'
+            return datetime.fromisoformat(ts)
+        
+        dt1 = parse_iso_timestamp(timestamp1)
+        dt2 = parse_iso_timestamp(timestamp2)
+        
+        return dt1 > dt2
+        
+    except Exception as exc:
+        logger.warning("Failed to compare timestamps '%s' and '%s': %s", timestamp1, timestamp2, exc)
+        # Fallback to string comparison
+        return timestamp1 > timestamp2

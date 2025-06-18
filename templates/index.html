@@ -8,6 +8,80 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+    <style>
+        .selected-user-section {
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .selected-user-info {
+            padding: 15px;
+        }
+        .user-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: #ffffff;
+            border: 2px solid #28a745;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .user-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #007bff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .user-details h3 {
+            margin: 0 0 5px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        .user-role {
+            background: #28a745;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .no-user-selected {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
+        .btn-select-user {
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .btn-select-user:hover {
+            background: #0056b3;
+            color: white;
+        }
+        .loading-message {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -18,11 +92,21 @@
                 <a href="{{ url_for('index') }}" class="nav-link active">Sync</a>
                 <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
                 <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
+                <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
                 <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
+                <button id="logoutBtn" class="btn-logout">Log Out</button>
             </nav>
         </header>
 
         <main class="content-area">
+            <!-- Selected User Section -->
+            <section class="selected-user-section card" style="margin-bottom: 20px;">
+                <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M12 12C15.3137 12 18 9.31371 18 6C18 2.68629 15.3137 0 12 0C8.68629 0 6 2.68629 6 6C6 9.31371 8.68629 12 12 12ZM12 14C7.58172 14 4 17.5817 4 22H20C20 17.5817 16.4183 14 12 14Z"></path></svg> Selected User for Sync</h2>
+                <div id="selectedUserInfo" class="selected-user-info">
+                    <div class="loading-message">Loading user information...</div>
+                </div>
+            </section>
+
             <section class="sync-settings card">
                 <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM13 12H17V14H11V7H13V12Z"></path></svg> Sync Settings</h2>
                 <form method="post" class="sync-form">
@@ -78,7 +162,7 @@
             <div class="status-message info">Next sync scheduled for: {{ next_run }}</div>
             {% endif %}
 
-            <div id="confirmationMessage" class="status-message {% if mtype == 'success' %}success{% elif mtype == 'stopped' %}error{% endif %}" {% if not message %}style="display:none;"{% endif %}>
+            <div id="confirmationMessage" class="status-message {% if mtype == 'success' %}success{% elif mtype == 'stopped' %}error{% elif mtype == 'error' %}error{% endif %}" {% if not message %}style="display:none;"{% endif %}>
                 {{ message }}
             </div>
         </main>
@@ -88,7 +172,134 @@
         </footer>
     </div>
 
+    <script src="{{ url_for('static', filename='logout.js') }}"></script>
     <script>
+        // Load selected user information on page load
+        async function loadSelectedUser() {
+            try {
+                const response = await fetch('/api/get_selected_user');
+                const data = await response.json();
+                
+                const selectedUserInfo = document.getElementById('selectedUserInfo');
+                
+                if (data.success && data.user) {
+                    const user = data.user;
+                    let warningMessage = '';
+                    
+                    // Add warning for managed users
+                    if (!user.is_owner || user.role === 'managed user') {
+                        warningMessage = `
+                            <div style="background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 10px; border-radius: 6px; margin-top: 10px;">
+                                <strong>⚠️ Managed User Limitation:</strong> Sync will only work from Plex → ${user.role === 'managed user' ? 'Trakt/Simkl' : 'external service'}. 
+                                Items from external services will NOT be marked as watched in Plex for this user.
+                            </div>
+                        `;
+                    }
+                    
+                    selectedUserInfo.innerHTML = `
+                        <div class="user-card">
+                            <div class="user-info">
+                                <div class="user-avatar">${user.username.charAt(0).toUpperCase()}</div>
+                                <div class="user-details">
+                                    <h3>${user.username}</h3>
+                                    <span class="user-role">${user.role}</span>
+                                </div>
+                            </div>
+                            <a href="/users" class="btn-select-user">Change User</a>
+                        </div>
+                        <div style="font-size: 12px; color: #666; text-align: center;">
+                            Sync will be performed for this user ${user.role === 'managed user' ? '(using scrobble)' : '(direct marking)'}
+                        </div>
+                        ${warningMessage}
+                    `;
+                    
+                    // Update sync options based on user type
+                    updateSyncOptionsForUser(user);
+                } else {
+                    selectedUserInfo.innerHTML = `
+                        <div class="no-user-selected">
+                            <div style="font-size: 48px; margin-bottom: 15px;">👤</div>
+                            <h3>No User Selected</h3>
+                            <p>Please select a user to perform sync operations.</p>
+                            <a href="/users" class="btn-select-user">Select User</a>
+                        </div>
+                    `;
+                    
+                    // Re-enable all options when no user is selected
+                    updateSyncOptionsForUser(null);
+                }
+            } catch (error) {
+                const selectedUserInfo = document.getElementById('selectedUserInfo');
+                selectedUserInfo.innerHTML = `
+                    <div class="no-user-selected">
+                        <div style="color: #dc3545;">❌ Error loading user information</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Update sync options based on user type
+        function updateSyncOptionsForUser(user) {
+            const restrictedOptions = ['collection', 'ratings', 'liked_lists', 'watchlists', 'live_sync'];
+            const isManagedUser = user && !user.is_owner;
+            
+            restrictedOptions.forEach(option => {
+                const checkbox = document.getElementById(option);
+                const label = document.querySelector(`label[for="${option}"]`);
+                
+                if (checkbox) {
+                    if (isManagedUser) {
+                        // Disable and uncheck for managed users
+                        checkbox.disabled = true;
+                        checkbox.checked = false;
+                        if (label) {
+                            label.style.opacity = '0.5';
+                            label.style.cursor = 'not-allowed';
+                        }
+                    } else {
+                        // Only re-enable if not disabled by provider restrictions
+                        const isProviderDisabled = checkbox.hasAttribute('data-provider-disabled');
+                        if (!isProviderDisabled) {
+                            checkbox.disabled = false;
+                            if (label) {
+                                label.style.opacity = '1';
+                                label.style.cursor = 'pointer';
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Add visual indication for managed user restrictions
+            const syncOptions = document.querySelector('.sync-options');
+            if (syncOptions) {
+                const existingNote = syncOptions.querySelector('.managed-user-note');
+                if (existingNote) {
+                    existingNote.remove();
+                }
+                
+                if (isManagedUser) {
+                    const note = document.createElement('div');
+                    note.className = 'managed-user-note';
+                    note.style.cssText = 'background: #f8f9fa; border: 1px solid #dee2e6; color: #6c757d; padding: 8px; border-radius: 4px; margin-top: 10px; font-size: 12px;';
+                    note.innerHTML = '<strong>Note:</strong> Collection, Ratings, Liked Lists, Watchlists, and Live Sync are disabled for managed users.';
+                    syncOptions.appendChild(note);
+                }
+            }
+        }
+
+        // Load user info on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSelectedUser();
+            
+            // Mark provider-disabled checkboxes for reference
+            const providerDisabledCheckboxes = document.querySelectorAll('input[type="checkbox"][disabled]');
+            providerDisabledCheckboxes.forEach(checkbox => {
+                checkbox.setAttribute('data-provider-disabled', 'true');
+            });
+        });
+
+        // Existing script for hiding confirmation messages
         const msg = document.getElementById('confirmationMessage');
         if (msg && msg.textContent.trim() !== '') {
             setTimeout(function() { msg.style.display = 'none'; }, 5000);

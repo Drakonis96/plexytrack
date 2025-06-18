@@ -12,11 +12,10 @@ from utils import guid_to_ids, normalize_year, to_iso_z, valid_guid, best_guid, 
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.2.7"
+APP_VERSION = "v0.3.0"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 TOKEN_FILE = "trakt_tokens.json"
-TRAKT_LAST_SYNC_FILE = "trakt_last_sync.txt"
 
 
 def load_trakt_tokens() -> None:
@@ -42,37 +41,6 @@ def save_trakt_tokens(access_token: str, refresh_token: Optional[str]) -> None:
         logger.error("Failed to save Trakt tokens: %s", exc)
 
 
-def load_trakt_last_sync_date() -> Optional[str]:
-    """Return the stored last sync date for Trakt."""
-    if os.path.exists(TRAKT_LAST_SYNC_FILE):
-        try:
-            with open(TRAKT_LAST_SYNC_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip() or None
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to load Trakt last sync date: %s", exc)
-    return None
-
-
-def save_trakt_last_sync_date(date_str: str) -> None:
-    """Persist ``date_str`` to :data:`TRAKT_LAST_SYNC_FILE`."""
-    try:
-        with open(TRAKT_LAST_SYNC_FILE, "w", encoding="utf-8") as f:
-            f.write(date_str)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to save Trakt last sync date: %s", exc)
-
-
-def get_trakt_last_activity(headers: dict) -> Optional[str]:
-    """Return the latest ``all`` activity timestamp from Trakt."""
-    try:
-        resp = trakt_request("GET", "/sync/last_activities", headers)
-        data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to retrieve Trakt last activities: %s", exc)
-        return None
-    if isinstance(data, dict):
-        return data.get("all")
-    return None
 
 
 def get_trakt_redirect_uri() -> str:
@@ -376,17 +344,34 @@ def sync_collection(plex, headers):
 
 
 def sync_ratings(plex, headers):
+    """Sync ratings from Plex to Trakt using cached ratings for better performance."""
+    from plex_utils import get_cached_ratings
+    
     movies: List[dict] = []
     shows: List[dict] = []
     episodes: List[dict] = []
 
     rated_now = to_iso_z(datetime.utcnow())
+    
+    # Get cached ratings for better performance
+    cached_ratings = get_cached_ratings(plex)
+    logger.info("Using cached ratings for %d sections", len(cached_ratings))
 
     for section in plex.library.sections():
+        section_key = str(section.key)
+        section_ratings = cached_ratings.get(section_key, {})
+        
+        if not section_ratings:
+            logger.debug("No cached ratings found for section: %s", section.title)
+            continue
+            
+        logger.debug("Processing %d rated items in section: %s", len(section_ratings), section.title)
+        
         if section.type == "movie":
-            for item in section.all():
-                rating = getattr(item, "userRating", None)
-                if rating is not None:
+            # Use cache to only fetch items that have ratings
+            for rating_key, rating in section_ratings.items():
+                try:
+                    item = plex.fetchItem(int(rating_key))
                     guid = best_guid(item)
                     obj = {
                         "title": item.title,
@@ -398,48 +383,71 @@ def sync_ratings(plex, headers):
                     if guid:
                         obj["ids"] = guid_to_ids(guid)
                     movies.append(obj)
+                except Exception as exc:
+                    logger.debug("Failed to fetch movie with rating key %s: %s", rating_key, exc)
+                    continue
+                    
         elif section.type == "show":
-            for show in section.all():
-                show_guid = best_guid(show)
-                show_ids = guid_to_ids(show_guid) if show_guid else {}
-                base = {"title": show.title}
-                if getattr(show, "year", None):
-                    base["year"] = normalize_year(show.year)
-                if show_ids:
-                    base["ids"] = show_ids
-
-                seasons_list = []
-                has_show_data = False
-
-                show_rating = getattr(show, "userRating", None)
-                if show_rating is not None:
-                    base["rating"] = int(round(float(show_rating)))
-                    base["rated_at"] = rated_now
-                    has_show_data = True
-
-                for season in show.seasons():
-                    season_rating = getattr(season, "userRating", None)
-                    if season_rating is not None:
-                        seasons_list.append({"number": int(season.index), "rating": int(round(float(season_rating))), "rated_at": rated_now})
-                        has_show_data = True
-                    for ep in season.episodes():
-                        ep_rating = getattr(ep, "userRating", None)
-                        if ep_rating is not None:
-                            ep_obj = {"season": int(season.index), "number": int(ep.index), "rating": int(round(float(ep_rating))), "rated_at": rated_now}
-                            ep_guid = best_guid(ep)
-                            if ep_guid:
-                                ep_obj["ids"] = guid_to_ids(ep_guid)
-                            elif show_ids:
+            # For shows, we need to determine if rating belongs to show, season, or episode
+            for rating_key, rating in section_ratings.items():
+                try:
+                    item = plex.fetchItem(int(rating_key))
+                    
+                    if item.type == "show":
+                        # Show rating
+                        show_guid = best_guid(item)
+                        show_ids = guid_to_ids(show_guid) if show_guid else {}
+                        base = {"title": item.title}
+                        if getattr(item, "year", None):
+                            base["year"] = normalize_year(item.year)
+                        if show_ids:
+                            base["ids"] = show_ids
+                        base["rating"] = int(round(float(rating)))
+                        base["rated_at"] = rated_now
+                        shows.append(base)
+                        
+                    elif item.type == "season":
+                        # Season rating - add to parent show
+                        show = item.show()
+                        show_guid = best_guid(show)
+                        show_ids = guid_to_ids(show_guid) if show_guid else {}
+                        base = {"title": show.title}
+                        if getattr(show, "year", None):
+                            base["year"] = normalize_year(show.year)
+                        if show_ids:
+                            base["ids"] = show_ids
+                        base["seasons"] = [{
+                            "number": int(item.index), 
+                            "rating": int(round(float(rating))), 
+                            "rated_at": rated_now
+                        }]
+                        shows.append(base)
+                        
+                    elif item.type == "episode":
+                        # Episode rating
+                        season = item.season()
+                        show = season.show()
+                        ep_obj = {
+                            "season": int(season.index), 
+                            "number": int(item.index), 
+                            "rating": int(round(float(rating))), 
+                            "rated_at": rated_now
+                        }
+                        ep_guid = best_guid(item)
+                        if ep_guid:
+                            ep_obj["ids"] = guid_to_ids(ep_guid)
+                        elif show:
+                            show_guid = best_guid(show)
+                            show_ids = guid_to_ids(show_guid) if show_guid else {}
+                            if show_ids:
                                 ep_obj["show"] = {"ids": show_ids}
                             else:
                                 ep_obj["title"] = show.title
-                            episodes.append(ep_obj)
-
-                if seasons_list:
-                    base["seasons"] = seasons_list
-
-                if has_show_data:
-                    shows.append(base)
+                        episodes.append(ep_obj)
+                        
+                except Exception as exc:
+                    logger.debug("Failed to fetch item with rating key %s: %s", rating_key, exc)
+                    continue
 
     payload = {}
     if movies:
@@ -580,7 +588,14 @@ def sync_collections_to_trakt(plex, headers):
 
 
 def sync_watchlist(plex, headers, plex_history, trakt_history):
-    account = plex.myPlexAccount()
+    # Import here to avoid circular imports
+    from app import get_plex_account
+    
+    account = get_plex_account()
+    if account is None:
+        logger.error("No Plex account available for watchlist sync")
+        return
+    
     try:
         plex_watch = account.watchlist()
     except Exception as exc:
@@ -806,35 +821,162 @@ def trakt_search_ids(
     is_movie: bool = True,
     year: Optional[int] = None,
 ) -> Dict[str, Union[str, int]]:
-    """Search Trakt by title and return a mapping of IDs.
-
-    If no clear result is found, returns an empty dict.
-    """
-    # Use text search endpoint
-    params = {"query": title, "type": "movie" if is_movie else "show", "limit": 1}
-    # Trakt search supports year filtering
-    if year and is_movie:
-        params["year"] = year
-    try:
-        resp = trakt_request("GET", "/search/text", headers, params=params)
-        data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Trakt search failed for '%s': %s", title, exc)
-        return {}
-
-    if not isinstance(data, list) or not data:
-        return {}
-
-    # Extract the media item from the search result
-    result = data[0]
+    """Search for a movie/show on Trakt and return its IDs."""
     media_type = "movie" if is_movie else "show"
-    media_item = result.get(media_type, {})
+    query_params = {"query": title, "type": media_type}
+    if year:
+        query_params["year"] = year
+
+    resp = trakt_request("GET", "/search", headers, params=query_params)
+    data = resp.json()
+
+    for result in data:
+        item = result.get(media_type)
+        if item:
+            ids = item.get("ids", {})
+            if ids:
+                return ids
+    return {}
+
+
+def scrobble_item_to_trakt(headers: dict, item_data: dict, progress: float = 100.0) -> bool:
+    """
+    Scrobble an item to Trakt using the /scrobble/stop endpoint.
+    This is used for managed users where we want to mark items as watched.
     
-    ids = media_item.get("ids", {}) or {}
-    # Normalize integer IDs
-    for k, v in list(ids.items()):
+    Args:
+        headers: Trakt API headers
+        item_data: Dict containing item info (title, year, ids, etc.)
+        progress: Progress percentage (default 100.0 to mark as watched)
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Use scrobble/stop endpoint with 100% progress to mark as watched
+        payload = {
+            "progress": progress
+        }
+        
+        if item_data.get("type") == "movie":
+            payload["movie"] = {
+                "title": item_data.get("title"),
+                "year": item_data.get("year"),
+                "ids": item_data.get("ids", {})
+            }
+        elif item_data.get("type") == "episode":
+            payload["episode"] = {
+                "title": item_data.get("episode_title", ""),
+                "season": item_data.get("season"),
+                "number": item_data.get("episode"), 
+                "ids": item_data.get("episode_ids", {})
+            }
+            if item_data.get("show_ids"):
+                payload["show"] = {
+                    "title": item_data.get("show_title"),
+                    "year": item_data.get("show_year"),
+                    "ids": item_data.get("show_ids", {})
+                }
+        
+        resp = trakt_request("POST", "/scrobble/stop", headers, json=payload)
+        
+        if resp.status_code in (200, 201):
+            logger.info("Successfully scrobbled %s to Trakt", item_data.get("title", "item"))
+            return True
+        elif resp.status_code == 409:
+            # Item was already scrobbled recently
+            logger.debug("Item already scrobbled recently: %s", item_data.get("title", "item"))
+            return True
+        else:
+            logger.error("Failed to scrobble %s: HTTP %d", item_data.get("title", "item"), resp.status_code)
+            return False
+            
+    except Exception as exc:
+        logger.error("Error scrobbling %s to Trakt: %s", item_data.get("title", "item"), exc)
+        return False
+
+
+def update_trakt_for_managed_user(headers: dict, movies: list, episodes: list) -> None:
+    """
+    Update Trakt for a managed user using scrobble endpoints.
+    This marks items as watched by scrobbling them with 100% progress.
+    
+    Args:
+        headers: Trakt API headers  
+        movies: List of movie data
+        episodes: List of episode data
+    """
+    logger.info("Syncing %d movies and %d episodes to Trakt for managed user using scrobble", 
+                len(movies), len(episodes))
+    
+    scrobbled_movies = 0
+    scrobbled_episodes = 0
+    
+    # Scrobble movies
+    for title, year, watched_at, guid in movies:
+        if not guid or not valid_guid(guid):
+            continue
+            
+        # Get IDs from GUID
+        ids = guid_to_ids(guid)
+        if not ids:
+            continue
+            
+        item_data = {
+            "type": "movie",
+            "title": title,
+            "year": year,
+            "ids": ids,
+            "watched_at": watched_at
+        }
+        
+        if scrobble_item_to_trakt(headers, item_data):
+            scrobbled_movies += 1
+    
+    # Scrobble episodes
+    for show_title, code, watched_at, guid in episodes:
+        if not guid or not valid_guid(guid):
+            continue
+            
+        # Parse season/episode from code (format: S01E01)
         try:
-            ids[k] = int(v) if str(v).isdigit() else v
-        except Exception:
-            pass
-    return ids
+            season_match = code.split("S")[1].split("E")[0]
+            episode_match = code.split("E")[1]
+            season_num = int(season_match)
+            episode_num = int(episode_match)
+        except (IndexError, ValueError):
+            logger.warning("Invalid episode code format: %s", code)
+            continue
+            
+        # For episodes, we need show IDs - try to get them from the library
+        show_ids = {}
+        try:
+            from app import get_plex_server
+            plex_server = get_plex_server()
+            if plex_server:
+                show_obj = get_show_from_library(plex_server, show_title)
+                if show_obj:
+                    show_guid = imdb_guid(show_obj) or best_guid(show_obj)
+                    if show_guid:
+                        show_ids = guid_to_ids(show_guid)
+        except Exception as exc:
+            logger.debug("Could not get show IDs for %s: %s", show_title, exc)
+        
+        # Episode IDs from the episode GUID
+        episode_ids = guid_to_ids(guid)
+        
+        item_data = {
+            "type": "episode", 
+            "show_title": show_title,
+            "show_ids": show_ids,
+            "season": season_num,
+            "episode": episode_num,
+            "episode_ids": episode_ids,
+            "watched_at": watched_at
+        }
+        
+        if scrobble_item_to_trakt(headers, item_data):
+            scrobbled_episodes += 1
+    
+    logger.info("Successfully scrobbled %d movies and %d episodes to Trakt", 
+                scrobbled_movies, scrobbled_episodes)

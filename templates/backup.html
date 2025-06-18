@@ -18,7 +18,9 @@
                 <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
                 <a href="{{ url_for('backup_page') }}" class="nav-link active">Backup</a>
                 <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
+                <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
                 <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
+                <button id="logoutBtn" class="btn-logout">Log Out</button>
             </nav>
         </header>
 
@@ -56,6 +58,7 @@
         </footer>
     </div>
 
+    <script src="{{ url_for('static', filename='logout.js') }}"></script>
     <script>
         const msg = document.getElementById('confirmationMessage');
         if (msg && msg.textContent.trim() !== '') {

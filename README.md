@@ -28,8 +28,22 @@ This application is currently in testing and is provided **as is**. I take no re
 
 The application expects the following API credentials:
 
-- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
-- `PLEX_TOKEN` – your Plex authentication token.
+### Plex Authentication (Primary Method - Credentials)
+
+- `PLEX_EMAIL` – your Plex account email address.
+- `PLEX_PASSWORD` – your Plex account password.
+- `PLEX_2FA_CODE` – optional 2FA code (required if 2FA is enabled on your Plex account).
+- `PLEX_SERVER_NAME` – optional specific server name (if you have multiple servers).
+
+### Plex Authentication (Legacy Method - Token)
+
+- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400` (deprecated).
+- `PLEX_TOKEN` – your Plex authentication token (deprecated).
+
+**Note**: The credentials method is now the primary authentication method, following the official PlexAPI schema. It provides better access to managed user histories and supports 2FA authentication.
+
+### Sync Services
+
 - `TRAKT_CLIENT_ID` – client ID for your Trakt application (optional if only using Simkl).
 - `TRAKT_CLIENT_SECRET` – client secret from your Trakt application (optional if only using Simkl).
 - `SIMKL_CLIENT_ID` – client ID for your Simkl application (optional if only using Trakt).
@@ -41,7 +55,7 @@ The application expects the following API credentials:
   unset, the address of the current UI is used automatically.
 - `TZ` – timezone for log timestamps, defaults to `Europe/Madrid`.
 
-You must set the Plex variables above and at least one pair of Trakt or Simkl
+You must set the Plex credentials above and at least one pair of Trakt or Simkl
 credentials. Leave the variables for the service you are not using unset.
 
 You do **not** need to provide a Trakt access token or refresh token. The web
@@ -107,8 +121,16 @@ the application will trigger an immediate sync whenever an event is received.
 2. Create a `.env` file in the project root and define the variables listed above. Example:
 
 ```
-PLEX_BASEURL=http://localhost:32400
-PLEX_TOKEN=YOUR_PLEX_TOKEN
+# Plex Authentication - Credentials method (recommended)
+PLEX_EMAIL=your_plex_email@example.com
+PLEX_PASSWORD=your_plex_password
+# PLEX_2FA_CODE=123456  # Only if 2FA is enabled
+# PLEX_SERVER_NAME=MyServer  # Only if you have multiple servers
+
+# Legacy token method (deprecated but still supported)
+# PLEX_BASEURL=http://localhost:32400
+# PLEX_TOKEN=YOUR_PLEX_TOKEN
+
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID
@@ -138,6 +160,12 @@ docker-compose -f docker-compose-local.yml up --build
    A sync interval of **at least 60 minutes is recommended**. Shorter intervals are generally unnecessary, and you can even schedule the job every 24 hours to reduce the load on your server and the Trakt or Simkl API.
 
 That's it! The container will continue to sync your Plex account with Trakt and/or Simkl according to the interval you set.
+
+## User Selection
+
+When using PlexyTrack with multiple Plex users (owner and managed users), you can choose which user's viewing history to synchronize.
+
+After selecting a user, you'll see a confirmation message indicating that the user was selected successfully. Each user's history is synchronized independently and always with a **full sync** to ensure complete data integrity across Plex, Trakt and Simkl.
 
 ## Screenshots
 
