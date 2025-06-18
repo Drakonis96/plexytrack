@@ -1783,7 +1783,13 @@ def sync():
                     movie_results = []
                     for title, year, guid in missing_movies:
                         try:
-                            if mark_as_watched_for_user(guid, "movie", selected_user):
+                            if mark_as_watched_for_user(
+                                guid,
+                                "movie",
+                                selected_user,
+                                title=title,
+                                year=year,
+                            ):
                                 movie_results.append((title, year, True))
                                 logger.debug("Marked movie as watched: %s (%s)", title, year)
                             else:
@@ -1799,7 +1805,13 @@ def sync():
                     episode_results = []
                     for show, code, guid in missing_episodes:
                         try:
-                            if mark_as_watched_for_user(guid, "episode", selected_user):
+                            if mark_as_watched_for_user(
+                                guid,
+                                "episode",
+                                selected_user,
+                                show_title=show,
+                                code=code,
+                            ):
                                 episode_results.append((show, code, True))
                                 logger.debug("Marked episode as watched: %s %s", show, code)
                             else:
@@ -3096,7 +3108,16 @@ def get_cached_users(account):
     
     return _cached_users
 
-def mark_as_watched_for_user(item_guid, item_type, user_data):
+def mark_as_watched_for_user(
+    item_guid,
+    item_type,
+    user_data,
+    *,
+    title=None,
+    year=None,
+    show_title=None,
+    code=None,
+):
     """
     Mark an item as watched for the selected user.
     Uses scrobble for managed users, direct marking for owner.
@@ -3114,10 +3135,44 @@ def mark_as_watched_for_user(item_guid, item_type, user_data):
         search_start = time.time()
         item = find_item_by_guid(plex_server, item_guid)
         search_duration = time.time() - search_start
-        
+
         if not item:
-            logger.debug("Item not found in Plex: %s (type: %s) - search took %.2fs", item_guid, item_type, search_duration)
-            return False
+            logger.debug(
+                "Item not found by GUID in Plex: %s (type: %s) - search took %.2fs",
+                item_guid,
+                item_type,
+                search_duration,
+            )
+
+            # Fallback search by title/year or show/code
+            if item_type == "movie" and title:
+                for section in plex_server.library.sections():
+                    if section.type != "movie":
+                        continue
+                    try:
+                        results = section.search(title=title)
+                        for candidate in results:
+                            if year is None or normalize_year(getattr(candidate, "year", None)) == normalize_year(year):
+                                item = candidate
+                                break
+                        if item:
+                            break
+                    except Exception:
+                        continue
+            elif item_type == "episode" and show_title and code:
+                try:
+                    season_num, episode_num = map(int, code.upper().lstrip("S").split("E"))
+                except ValueError:
+                    season_num = episode_num = None
+                show_obj = get_show_from_library(plex_server, show_title)
+                if show_obj and season_num is not None and episode_num is not None:
+                    try:
+                        item = show_obj.episode(season=season_num, episode=episode_num)
+                    except Exception:
+                        item = None
+
+            if not item:
+                return False
         
         # Validate item type matches expectation
         actual_type = getattr(item, 'TYPE', 'unknown')
@@ -3184,17 +3239,54 @@ def mark_as_watched_for_user(item_guid, item_type, user_data):
                             
                             # Find the item from the managed user's perspective
                             user_item = find_item_by_guid(user_plex, item_guid)
+                            if not user_item:
+                                if item_type == "movie" and title:
+                                    for section in user_plex.library.sections():
+                                        if section.type != "movie":
+                                            continue
+                                        try:
+                                            results = section.search(title=title)
+                                            for candidate in results:
+                                                if year is None or normalize_year(getattr(candidate, "year", None)) == normalize_year(year):
+                                                    user_item = candidate
+                                                    break
+                                            if user_item:
+                                                break
+                                        except Exception:
+                                            continue
+                                elif item_type == "episode" and show_title and code:
+                                    try:
+                                        season_num, episode_num = map(int, code.upper().lstrip("S").split("E"))
+                                    except ValueError:
+                                        season_num = episode_num = None
+                                    show_obj = get_show_from_library(user_plex, show_title)
+                                    if show_obj and season_num is not None and episode_num is not None:
+                                        try:
+                                            user_item = show_obj.episode(season=season_num, episode=episode_num)
+                                        except Exception:
+                                            user_item = None
+
                             if user_item:
                                 user_item.markWatched()
-                                logger.info("Marked %s as watched for managed user %s: %s", 
-                                           item_type, user_data["username"], item.title)
+                                logger.info(
+                                    "Marked %s as watched for managed user %s: %s",
+                                    item_type,
+                                    user_data["username"],
+                                    item.title,
+                                )
                                 return True
                             else:
                                 # Alternative: mark as watched from main server for this user
-                                logger.warning("Item not accessible from managed user perspective, marking via main server")
+                                logger.warning(
+                                    "Item not accessible from managed user perspective, marking via main server"
+                                )
                                 item.markWatched()
-                                logger.info("Marked %s as watched for managed user %s via main server: %s", 
-                                           item_type, user_data["username"], item.title)
+                                logger.info(
+                                    "Marked %s as watched for managed user %s via main server: %s",
+                                    item_type,
+                                    user_data["username"],
+                                    item.title,
+                                )
                                 return True
                         else:
                             logger.error("Could not switch to managed user: %s", user_data["username"])
