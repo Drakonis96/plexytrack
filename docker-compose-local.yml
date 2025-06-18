@@ -6,9 +6,9 @@ services:
 
     environment:
       - TZ=Europe/Madrid
-      - PLEX_BASEURL=192.168.68.120:32400
+      - PLEX_BASEURL=your_plex_base_url
 
-      - TRAKT_CLIENT_ID=201c17e5507ab2712194f56fe949f0e4934416fbcb1bfb3ed5c584ec019583ae
-      - TRAKT_CLIENT_SECRET=60e9afba0f8cce7053647c0742b378f142588e6c4eedfeba2eb66e309784f0e6
-      - SIMKL_CLIENT_ID=ea3cb3f867abe390e8c85d44176cd4b7747a14086dbc6084062c7247ef25dcbd
-      - SIMKL_CLIENT_SECRET=3f9f00b3f16158796210aedcdaaf5028cdadec2fb8005a81428bca64b9210487
+      - TRAKT_CLIENT_ID=your_trakt_client_id
+      - TRAKT_CLIENT_SECRET=your_trakt_client_secret
+      - SIMKL_CLIENT_ID=your_simkl_client_id
+      - SIMKL_CLIENT_SECRET=your_simkl_client_secret
