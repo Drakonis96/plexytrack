@@ -71,6 +71,22 @@ body {
     color: #ffffff;
 }
 
+/* Logout button */
+.btn-logout {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 20px;
+}
+
+.btn-logout:hover {
+    background: #c82333;
+}
+
 /* Users table */
 .user-table {
     width: 100%;

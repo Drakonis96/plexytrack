@@ -172,19 +172,6 @@
             border-radius: 4px;
             margin-top: 10px;
         }
-        .btn-logout {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-left: 20px;
-        }
-        .btn-logout:hover {
-            background: #c82333;
-        }
     </style>
 </head>
 <body>
@@ -198,7 +185,7 @@
                 <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
                 <a href="{{ url_for('users_page') }}" class="nav-link active">Users</a>
                 <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
-                <button id="logoutBtn" class="btn-logout" style="display: none;">Log Out</button>
+                <button id="logoutBtn" class="btn-logout">Log Out</button>
             </nav>
         </header>
 
@@ -268,6 +255,7 @@
         </footer>
     </div>
 
+    <script src="{{ url_for('static', filename='logout.js') }}"></script>
     <script>
         let currentStep = 1;
         let authToken = null;
@@ -309,10 +297,8 @@
                     selectedServer = state.selectedServer;
                     selectedUser = state.selectedUser;
                     
-                    // Show logout button if authenticated
+                    // Show success message if authenticated
                     if (authToken) {
-                        document.getElementById('logoutBtn').style.display = 'block';
-                        // Show success message for authenticated state
                         const authSuccess = document.getElementById('authSuccess');
                         authSuccess.textContent = 'Session restored - you are authenticated with Plex';
                         authSuccess.style.display = 'block';
@@ -350,8 +336,6 @@
             document.getElementById('password').value = '';
             document.getElementById('twoFACode').value = '';
             
-            // Hide logout button
-            document.getElementById('logoutBtn').style.display = 'none';
             
             // Reset UI
             updateStepVisuals();
@@ -370,27 +354,6 @@
                 updateStepVisuals();
             }
             
-            // Add logout button event listener
-            document.getElementById('logoutBtn').addEventListener('click', async function() {
-                try {
-                    const response = await fetch('/logout', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        }
-                    });
-                    
-                    if (response.ok) {
-                        clearState();
-                        alert('Successfully logged out');
-                    } else {
-                        alert('Error logging out');
-                    }
-                } catch (error) {
-                    console.error('Logout error:', error);
-                    alert('Error logging out');
-                }
-            });
             
             // Add form input listeners to save state on changes
             const formInputs = ['email', 'password', 'twoFACode'];
@@ -466,7 +429,6 @@
                     currentStep = 2;
                     updateStepVisuals();
                     saveState(); // Save state after successful authentication
-                    document.getElementById('logoutBtn').style.display = 'block'; // Show logout button
                     loadServers();
                 } else if (data.requires_2fa) {
                     // Show error asking for 2FA code

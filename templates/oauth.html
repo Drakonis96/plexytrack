@@ -20,6 +20,7 @@
                 <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
                 <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
                 <a href="{{ url_for('oauth_index') }}" class="nav-link active">OAuth</a>
+                <button id="logoutBtn" class="btn-logout">Log Out</button>
             </nav>
         </header>
 
@@ -39,9 +40,10 @@
             {% endif %}
         </main>
 
-        <footer class="app-footer">
-            <p>MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
-        </footer>
+    <footer class="app-footer">
+        <p>MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
+    </footer>
     </div>
+    <script src="{{ url_for('static', filename='logout.js') }}"></script>
 </body>
 </html>
