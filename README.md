@@ -36,19 +36,18 @@ This application is currently in testing and is provided **as is**. I take no re
 
 The application expects the following API credentials:
 
-### Plex Authentication (Primary Method - Credentials)
+### Plex Authentication (Primary Method)
+
+- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
+- `PLEX_TOKEN` – your Plex authentication token.
+
+### Optional enviroment variables
+You can automatically set upt these directly on the web interface by logging in to your Plex account. So you do not need to provide them on .env or compose files.
 
 - `PLEX_EMAIL` – your Plex account email address.
 - `PLEX_PASSWORD` – your Plex account password.
 - `PLEX_2FA_CODE` – optional 2FA code (required if 2FA is enabled on your Plex account).
 - `PLEX_SERVER_NAME` – optional specific server name (if you have multiple servers).
-
-### Plex Authentication (Legacy Method - Token)
-
-- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400` (deprecated).
-- `PLEX_TOKEN` – your Plex authentication token (deprecated).
-
-**Note**: The credentials method is now the primary authentication method, following the official PlexAPI schema. It provides better access to managed user histories and supports 2FA authentication.
 
 ### Sync Services
 
@@ -63,7 +62,7 @@ The application expects the following API credentials:
   unset, the address of the current UI is used automatically.
 - `TZ` – timezone for log timestamps, defaults to `Europe/Madrid`.
 
-You must set the Plex credentials above and at least one pair of Trakt or Simkl
+You must set the Plex base URL, plex token (as fallback) and at least one pair of Trakt or Simkl
 credentials. Leave the variables for the service you are not using unset.
 
 You do **not** need to provide a Trakt access token or refresh token. The web
@@ -156,19 +155,18 @@ the application will trigger an immediate sync whenever an event is received.
 
 ```
 # Plex Authentication - Credentials method (recommended)
-PLEX_EMAIL=your_plex_email@example.com
-PLEX_PASSWORD=your_plex_password
-# PLEX_2FA_CODE=123456  # Only if 2FA is enabled
-# PLEX_SERVER_NAME=MyServer  # Only if you have multiple servers
-
-# Legacy token method (deprecated but still supported)
-# PLEX_BASEURL=http://localhost:32400
-# PLEX_TOKEN=YOUR_PLEX_TOKEN
+PLEX_BASEURL=your_plex_base_url
+PLEX_TOKEN=your_plex_token
+PLEX_EMAIL=your_plex_email@example.com #Better to provide it through the webUI
+PLEX_PASSWORD=your_plex_password #Better to provide it through the webUI
+# PLEX_2FA_CODE=123456  # Only if 2FA is enabled and better to provide it through the webUI
+# PLEX_SERVER_NAME=MyServer  # Only if you have multiple servers, but still, better to provide it through the webUI
 
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID
 SIMKL_CLIENT_SECRET=YOUR_SIMKL_CLIENT_SECRET
+
 # Optional custom redirect URIs
 # TRAKT_REDIRECT_URI=http://localhost:5030/oauth/trakt
 # SIMKL_REDIRECT_URI=http://localhost:5030/oauth/simkl
