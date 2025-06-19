@@ -7,6 +7,14 @@
 This project synchronizes your Plex library with Trakt. Besides watched history it can optionally add items to your Trakt collection, sync ratings and watchlists, and now mirrors Trakt lists you like as Plex collections. Collections created in Plex will in turn appear as Trakt lists. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
 The recommended sync interval is **at least 60 minutes**. Shorter intervals generally do not provide any benefit, and you can even synchronize once every 24 hours to reduce the load on your server and the API.
 
+## Features
+
+- Bidirectional sync of watched history between Plex and Trakt or Simkl
+- Optional synchronization of ratings, collections, liked lists and watchlists
+- Live Sync mode to trigger updates immediately from Plex webhooks
+- Simple backup and restore of all your Trakt data from the web interface
+- Intuitive UI for configuration and user selection
+
 ## CONTENTS
 
 - [Disclaimer](#disclaimer)
@@ -74,6 +82,32 @@ If PlexyTrack is accessed through a reverse proxy, add both `https` and `http` v
 The application uses `plexapi` version 4.15 or newer (but below 5).
 
 If you don't already have the Trakt or Simkl credentials, please see the next sections on how to obtain them.
+
+## Quick Start
+
+1. Install **Docker Desktop** (Windows/macOS) or `docker` and `docker-compose` (Linux).
+2. [Download](https://github.com/) or clone this repository and open a terminal inside the folder.
+3. Create a file named `.env` and paste your Plex, Trakt or Simkl details as shown below:
+
+   ```
+   # Example .env
+   PLEX_EMAIL=you@example.com
+   PLEX_PASSWORD=your_password
+   TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
+   TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
+   # ...other variables...
+   TZ=Europe/Madrid
+   ```
+
+4. Start the application with:
+
+   ```
+   docker-compose up -d
+   ```
+
+5. Open `http://localhost:5030` in your browser and follow the on‑screen steps to authorize Trakt or Simkl and select the Plex user you want to sync.
+
+Once configured, PlexyTrack will keep your libraries in sync on the schedule you choose.
 
 ### Collections and watchlists
 
@@ -155,7 +189,7 @@ file:
 docker-compose -f docker-compose-local.yml up --build
 ```
 
-4. Visit `http://localhost:5030` in your browser. You can adjust the sync interval on the page and also stop the synchronization job at any time using the **Stop Sync** button. The background job starts automatically when the container is running.
+4. Visit `http://localhost:5030` in your browser. You can adjust the sync interval on the page. The **Start Sync** button schedules the job, while **Stop Sync** now immediately cancels any running sync and removes future scheduled jobs.
 
    A sync interval of **at least 60 minutes is recommended**. Shorter intervals are generally unnecessary, and you can even schedule the job every 24 hours to reduce the load on your server and the Trakt or Simkl API.
 

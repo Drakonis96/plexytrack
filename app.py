@@ -29,6 +29,7 @@ from flask import (
 from flask import send_file, session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
+from threading import Event
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
@@ -135,6 +136,10 @@ session_plex_credentials = {
     'token': None,  # Store the authentication token
     'baseurl': None  # Store the server baseurl if available
 }
+
+# Event used to cancel an ongoing sync
+stop_event = Event()
+
 
 # --------------------------------------------------------------------------- #
 # TRAKT / SIMKL OAUTH CONSTANTS
@@ -1664,6 +1669,9 @@ def validate_bidirectional_sync_config():
 
 def sync():
     """Run the main synchronization logic with selected user."""
+    if stop_event.is_set():
+        logger.info("Sync aborted before start")
+        return
     # Reset cache to ensure fresh data on every sync start
     reset_cache()
     
@@ -1719,6 +1727,10 @@ def sync():
             except Exception as exc:
                 logger.error("Failed to retrieve Trakt history: %s", exc)
                 trakt_movies, trakt_episodes = {}, {}
+
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
             
             # Always do full sync with Plex - get all history without date filtering
             plex_movies, plex_episodes = get_selected_user_history()
@@ -1753,11 +1765,19 @@ def sync():
                 if guid not in trakt_episode_guids
             ]
 
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+
             if SYNC_WATCHED:
                 try:
                     update_trakt(headers, new_movies, new_episodes)
                 except Exception as exc:
                     logger.error("Failed updating Trakt history: %s", exc)
+
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
 
             missing_movies = {
                 (title, year, guid)
@@ -1782,6 +1802,9 @@ def sync():
                     movie_start = time.time()
                     movie_results = []
                     for title, year, guid in missing_movies:
+                        if stop_event.is_set():
+                            logger.info("Sync cancelled")
+                            return
                         try:
                             if mark_as_watched_for_user(
                                 guid,
@@ -1804,6 +1827,9 @@ def sync():
                     episode_start = time.time()
                     episode_results = []
                     for show, code, guid in missing_episodes:
+                        if stop_event.is_set():
+                            logger.info("Sync cancelled")
+                            return
                         try:
                             if mark_as_watched_for_user(
                                 guid,
@@ -1837,6 +1863,9 @@ def sync():
                                selected_user["username"], len(missing_movies), len(missing_episodes))
 
             if SYNC_LIKED_LISTS:
+                if stop_event.is_set():
+                    logger.info("Sync cancelled")
+                    return
                 try:
                     sync_liked_lists(plex, headers)
                     sync_collections_to_trakt(plex, headers)
@@ -1845,6 +1874,9 @@ def sync():
                 except Exception as exc:
                     logger.error("Liked-lists sync failed: %s", exc)
             if SYNC_WATCHLISTS:
+                if stop_event.is_set():
+                    logger.info("Sync cancelled")
+                    return
                 try:
                     sync_watchlist(
                         plex,
@@ -1865,6 +1897,10 @@ def sync():
                 len(simkl_movies),
                 len(simkl_episodes),
             )
+
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
             
             # Always do full sync with Plex - get all history without date filtering
             plex_movies, plex_episodes = get_selected_user_history()
@@ -1891,9 +1927,16 @@ def sync():
                 )
                 for m in movies_to_add
             ]
+
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
             # Para cada episodio necesitamos el GUID de la SERIE (no el del episodio) para que Simkl pueda identificarla correctamente.
             episodes_to_add_fmt = []
             for e in episodes_to_add:
+                if stop_event.is_set():
+                    logger.info("Sync cancelled")
+                    return
                 ep_info = plex_episodes[e]
                 show_title = ep_info["show"]
                 code = ep_info["code"]
@@ -1924,6 +1967,10 @@ def sync():
             if movies_to_add_fmt or episodes_to_add_fmt:
                 update_simkl(headers, movies_to_add_fmt, episodes_to_add_fmt)
 
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+
             # Plex <- Simkl (only for owner users)
             if selected_user.get("is_owner", False):
                 movies_to_add_plex = set(simkl_movies) - set(plex_movies)
@@ -1942,6 +1989,9 @@ def sync():
                     for e in episodes_to_add_plex
                 }
                 if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
+                    if stop_event.is_set():
+                        logger.info("Sync cancelled")
+                        return
                     update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
             else:
                 movies_to_add_plex = set(simkl_movies) - set(plex_movies)
@@ -1957,24 +2007,39 @@ def sync():
 
     # Sincronizar valoraciones solo es compatible con Trakt por ahora
     if SYNC_RATINGS and SYNC_PROVIDER == "trakt":
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
         sync_ratings(plex, headers)
     elif SYNC_RATINGS and SYNC_PROVIDER == "simkl":
         logger.warning("Ratings sync with Simkl is not yet supported.")
 
     if SYNC_WATCHLISTS and SYNC_PROVIDER == "trakt":
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
         sync_watchlist(plex, headers, plex_movies, trakt_movies)
     elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
 
     if SYNC_COLLECTION:
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
         sync_collection(plex, headers)
 
     if SYNC_LIKED_LISTS and SYNC_PROVIDER == "trakt":
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
         sync_liked_lists(plex, headers)
     elif SYNC_LIKED_LISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Liked lists sync with Simkl is not yet supported.")
 
     if SYNC_PROVIDER == "trakt":
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
         sync_collections_to_trakt(plex, headers)
     elif SYNC_PROVIDER == "simkl":
         logger.warning("Plex Collections sync to Simkl is not yet supported.")
@@ -2147,11 +2212,12 @@ def index():
         if selected_user and not selected_user.get("is_owner", False):
             # For managed users, disable restricted sync options regardless of form input
             SYNC_COLLECTION = False
-            SYNC_RATINGS = False
             SYNC_LIKED_LISTS = False
             SYNC_WATCHLISTS = False
-            LIVE_SYNC = False
-            logger.info("Restricted sync options disabled for managed user: %s", selected_user.get("username", "Unknown"))
+            logger.info(
+                "Restricted sync options disabled for managed user: %s",
+                selected_user.get("username", "Unknown"),
+            )
 
         if SYNC_PROVIDER == "simkl":
             SYNC_COLLECTION = False
@@ -2185,21 +2251,18 @@ def index():
     if job:
         next_run = job.next_run_time
     
-    # Check if a managed user is selected and adjust sync options for display
     selected_user = load_selected_user()
     display_collection = SYNC_COLLECTION
     display_ratings = SYNC_RATINGS
     display_liked_lists = SYNC_LIKED_LISTS
     display_watchlists = SYNC_WATCHLISTS
     display_live_sync = LIVE_SYNC
-    
+
     if selected_user and not selected_user.get("is_owner", False):
-        # For managed users, show these options as unchecked/disabled
+        # Disable restricted options in the UI for managed users
         display_collection = False
-        display_ratings = False
         display_liked_lists = False
         display_watchlists = False
-        display_live_sync = False
     
     return render_template(
         "index.html",
@@ -2415,6 +2478,16 @@ def restore_backup_route():
         logger.error("Failed to restore backup: %s", exc)
         return redirect(url_for("backup_page", message="Restore failed", mtype="error"))
     return redirect(url_for("backup_page", message="Backup restored", mtype="success"))
+
+
+@app.route("/webhook", methods=["POST"])
+def plex_webhook():
+    """Handle Plex webhook events for live synchronization."""
+    if LIVE_SYNC:
+        # Trigger a one-off sync immediately
+        stop_event.clear()
+        scheduler.add_job(sync, "date", run_date=datetime.now())
+    return "", 204
 
 
 @app.route("/users")
@@ -2988,6 +3061,7 @@ def start_scheduler():
        para evitar duplicados.
     """
     global scheduler
+    stop_event.clear()
     # Recreate scheduler if it was shut down previously
     if scheduler.state == STATE_STOPPED:
         scheduler = BackgroundScheduler()
@@ -3018,6 +3092,7 @@ def start_scheduler():
 def stop_scheduler():
     """Detiene y elimina el job de sincronización dejando el scheduler limpio."""
     global scheduler
+    stop_event.set()
     for job in scheduler.get_jobs():
         scheduler.remove_job(job.id)
     if scheduler.running and not scheduler.get_jobs():

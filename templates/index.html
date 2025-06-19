@@ -240,7 +240,7 @@
 
         // Update sync options based on user type
         function updateSyncOptionsForUser(user) {
-            const restrictedOptions = ['collection', 'ratings', 'liked_lists', 'watchlists', 'live_sync'];
+            const restrictedOptions = ['collection', 'liked_lists', 'watchlists'];
             const isManagedUser = user && !user.is_owner;
             
             restrictedOptions.forEach(option => {
@@ -282,7 +282,7 @@
                     const note = document.createElement('div');
                     note.className = 'managed-user-note';
                     note.style.cssText = 'background: #f8f9fa; border: 1px solid #dee2e6; color: #6c757d; padding: 8px; border-radius: 4px; margin-top: 10px; font-size: 12px;';
-                    note.innerHTML = '<strong>Note:</strong> Collection, Ratings, Liked Lists, Watchlists, and Live Sync are disabled for managed users.';
+                    note.innerHTML = '<strong>Note:</strong> Collection, Liked Lists, and Watchlists are disabled for managed users.';
                     syncOptions.appendChild(note);
                 }
             }

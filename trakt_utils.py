@@ -593,6 +593,11 @@ def sync_watchlist(plex, headers, plex_history, trakt_history):
     
     account = get_plex_account()
     if account is None:
+        try:
+            account = plex.myPlexAccount()
+        except Exception:  # noqa: BLE001
+            account = None
+    if account is None:
         logger.error("No Plex account available for watchlist sync")
         return
     
