@@ -587,7 +587,7 @@ def sync_collections_to_trakt(plex, headers):
                     logger.error("Failed updating list %s: %s", slug, exc)
 
 
-def sync_watchlist(plex, headers, plex_history, trakt_history):
+def sync_watchlist(plex, headers, plex_history, trakt_history, *, direction="both"):
     # Import here to avoid circular imports
     from app import get_plex_account
     
@@ -642,61 +642,65 @@ def sync_watchlist(plex, headers, plex_history, trakt_history):
         elif item.TYPE == "show":
             shows_to_add.append({"ids": data})
     payload = {}
-    if movies_to_add:
-        payload["movies"] = movies_to_add
-    if shows_to_add:
-        payload["shows"] = shows_to_add
-    if payload:
-        trakt_request("POST", "/sync/watchlist", headers, json=payload)
-        logger.info("Added %d items to Trakt watchlist", len(movies_to_add) + len(shows_to_add))
+    if direction in ("both", "plex_to_service"):
+        if movies_to_add:
+            payload["movies"] = movies_to_add
+        if shows_to_add:
+            payload["shows"] = shows_to_add
+        if payload:
+            trakt_request("POST", "/sync/watchlist", headers, json=payload)
+            logger.info("Added %d items to Trakt watchlist", len(movies_to_add) + len(shows_to_add))
 
     add_to_plex = []
-    for lst in (trakt_movies, trakt_shows):
-        for it in lst:
-            data = it.get(it["type"], {})
-            ids = data.get("ids", {})
-            guid = None
-            if ids.get("imdb"):
-                guid = f"imdb://{ids['imdb']}"
-            elif ids.get("tmdb"):
-                guid = f"tmdb://{ids['tmdb']}"
-            if not guid or guid in plex_guids:
-                continue
-            item = find_item_by_guid(plex, guid)
-            if item:
-                add_to_plex.append(item)
-    if add_to_plex:
-        try:
-            account.addToWatchlist(add_to_plex)
-            logger.info("Added %d items to Plex watchlist", len(add_to_plex))
-        except Exception as exc:
-            logger.error("Failed adding Plex watchlist items: %s", exc)
-
-    for guid in list(plex_guids):
-        if guid in trakt_history or guid in plex_history:
-            try:
+    if direction in ("both", "service_to_plex"):
+        for lst in (trakt_movies, trakt_shows):
+            for it in lst:
+                data = it.get(it["type"], {})
+                ids = data.get("ids", {})
+                guid = None
+                if ids.get("imdb"):
+                    guid = f"imdb://{ids['imdb']}"
+                elif ids.get("tmdb"):
+                    guid = f"tmdb://{ids['tmdb']}"
+                if not guid or guid in plex_guids:
+                    continue
                 item = find_item_by_guid(plex, guid)
                 if item:
-                    account.removeFromWatchlist([item])
-            except Exception:
-                pass
+                    add_to_plex.append(item)
+        if add_to_plex:
+            try:
+                account.addToWatchlist(add_to_plex)
+                logger.info("Added %d items to Plex watchlist", len(add_to_plex))
+            except Exception as exc:
+                logger.error("Failed adding Plex watchlist items: %s", exc)
+
+    if direction in ("both", "service_to_plex"):
+        for guid in list(plex_guids):
+            if guid in trakt_history or guid in plex_history:
+                try:
+                    item = find_item_by_guid(plex, guid)
+                    if item:
+                        account.removeFromWatchlist([item])
+                except Exception:
+                    pass
     remove = []
-    for lst in (trakt_movies, trakt_shows):
-        for it in lst:
-            data = it.get(it["type"], {})
-            ids = data.get("ids", {})
-            guid = None
-            if ids.get("imdb"):
-                guid = f"imdb://{ids['imdb']}"
-            elif ids.get("tmdb"):
-                guid = f"tmdb://{ids['tmdb']}"
-            elif ids.get("tvdb"):
-                guid = f"tvdb://{ids['tvdb']}"
-            if guid and (guid in plex_history or guid in trakt_history) and guid not in plex_guids:
-                remove.append({"ids": guid_to_ids(guid)})
-    if remove:
-        trakt_request("POST", "/sync/watchlist/remove", headers, json={"movies": remove, "shows": remove})
-        logger.info("Removed %d items from Trakt watchlist", len(remove))
+    if direction in ("both", "plex_to_service"):
+        for lst in (trakt_movies, trakt_shows):
+            for it in lst:
+                data = it.get(it["type"], {})
+                ids = data.get("ids", {})
+                guid = None
+                if ids.get("imdb"):
+                    guid = f"imdb://{ids['imdb']}"
+                elif ids.get("tmdb"):
+                    guid = f"tmdb://{ids['tmdb']}"
+                elif ids.get("tvdb"):
+                    guid = f"tvdb://{ids['tvdb']}"
+                if guid and (guid in plex_history or guid in trakt_history) and guid not in plex_guids:
+                    remove.append({"ids": guid_to_ids(guid)})
+        if remove:
+            trakt_request("POST", "/sync/watchlist/remove", headers, json={"movies": remove, "shows": remove})
+            logger.info("Removed %d items from Trakt watchlist", len(remove))
 
 
 def fetch_trakt_history_full(headers) -> list:

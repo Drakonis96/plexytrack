@@ -128,6 +128,16 @@ scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
 plex_account = None  # will hold MyPlexAccount instance
 
+# Sync direction constants
+DIRECTION_BOTH = "both"
+DIRECTION_PLEX_TO_SERVICE = "plex_to_service"
+DIRECTION_SERVICE_TO_PLEX = "service_to_plex"
+
+# Default per-sync-type direction (owner only)
+HISTORY_SYNC_DIRECTION = DIRECTION_BOTH
+LISTS_SYNC_DIRECTION = DIRECTION_BOTH
+WATCHLISTS_SYNC_DIRECTION = DIRECTION_BOTH
+
 # Global storage for session-based Plex credentials (for scheduler access)
 session_plex_credentials = {
     'email': None,
@@ -1769,7 +1779,7 @@ def sync():
                 logger.info("Sync cancelled")
                 return
 
-            if SYNC_WATCHED:
+            if SYNC_WATCHED and HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
                 try:
                     update_trakt(headers, new_movies, new_episodes)
                 except Exception as exc:
@@ -1791,7 +1801,7 @@ def sync():
             }
             
             # Bidirectional sync: Mark missing items as watched for selected user (only for owner users)
-            if selected_user.get("is_owner", False):
+            if HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX) and selected_user.get("is_owner", False):
                 if missing_movies or missing_episodes:
                     start_time = time.time()
                     logger.info("Bidirectional sync: Marking %d movies and %d episodes as watched for user %s (%s)", 
@@ -1857,9 +1867,9 @@ def sync():
                                successful_movies, len(missing_movies), movie_duration,
                                successful_episodes, len(missing_episodes), episode_duration,
                                selected_user["username"], total_duration)
-            else:
+            elif HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
                 if missing_movies or missing_episodes:
-                    logger.info("Skipping bidirectional sync for managed user %s: %d movies and %d episodes would have been synced from Trakt to Plex", 
+                    logger.info("Skipping bidirectional sync for managed user %s: %d movies and %d episodes would have been synced from Trakt to Plex",
                                selected_user["username"], len(missing_movies), len(missing_episodes))
 
             if SYNC_LIKED_LISTS:
@@ -1867,8 +1877,10 @@ def sync():
                     logger.info("Sync cancelled")
                     return
                 try:
-                    sync_liked_lists(plex, headers)
-                    sync_collections_to_trakt(plex, headers)
+                    if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
+                        sync_liked_lists(plex, headers)
+                    if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
+                        sync_collections_to_trakt(plex, headers)
                 except TraktAccountLimitError as exc:
                     logger.error("Liked-lists sync skipped: %s", exc)
                 except Exception as exc:
@@ -1883,6 +1895,7 @@ def sync():
                         headers,
                         plex_movie_guids | plex_episode_guids,
                         trakt_movie_guids | trakt_episode_guids,
+                        direction=WATCHLISTS_SYNC_DIRECTION,
                     )
                 except TraktAccountLimitError as exc:
                     logger.error("Watchlist sync skipped: %s", exc)
@@ -1964,15 +1977,16 @@ def sync():
                     )
                 )
             
-            if movies_to_add_fmt or episodes_to_add_fmt:
-                update_simkl(headers, movies_to_add_fmt, episodes_to_add_fmt)
+            if SYNC_WATCHED and HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
+                if movies_to_add_fmt or episodes_to_add_fmt:
+                    update_simkl(headers, movies_to_add_fmt, episodes_to_add_fmt)
 
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
 
             # Plex <- Simkl (only for owner users)
-            if selected_user.get("is_owner", False):
+            if HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX) and selected_user.get("is_owner", False):
                 movies_to_add_plex = set(simkl_movies) - set(plex_movies)
                 episodes_to_add_plex = set(simkl_episodes) - set(plex_episodes)
                 logger.info(
@@ -1993,7 +2007,7 @@ def sync():
                         logger.info("Sync cancelled")
                         return
                     update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
-            else:
+            elif HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
                 movies_to_add_plex = set(simkl_movies) - set(plex_movies)
                 episodes_to_add_plex = set(simkl_episodes) - set(plex_episodes)
                 if movies_to_add_plex or episodes_to_add_plex:
@@ -2018,7 +2032,7 @@ def sync():
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
-        sync_watchlist(plex, headers, plex_movies, trakt_movies)
+        sync_watchlist(plex, headers, plex_movies, trakt_movies, direction=WATCHLISTS_SYNC_DIRECTION)
     elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
 
@@ -2191,6 +2205,7 @@ def restore_backup(headers, data: dict) -> None:
 @app.route("/", methods=["GET", "POST"])
 def index():
     global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
+    global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION
 
     load_trakt_tokens()
     load_simkl_tokens()
@@ -2207,13 +2222,20 @@ def index():
         SYNC_WATCHLISTS = request.form.get("watchlists") is not None
         LIVE_SYNC = request.form.get("live_sync") is not None
 
+        HISTORY_SYNC_DIRECTION = request.form.get("history_direction", DIRECTION_BOTH)
+        LISTS_SYNC_DIRECTION = request.form.get("lists_direction", DIRECTION_BOTH)
+        WATCHLISTS_SYNC_DIRECTION = request.form.get("watchlists_direction", DIRECTION_BOTH)
+
         # Check if a managed user is selected and restrict options
         selected_user = load_selected_user()
         if selected_user and not selected_user.get("is_owner", False):
-            # For managed users, disable restricted sync options regardless of form input
+            # For managed users force Plex -> service direction and disable restricted options
             SYNC_COLLECTION = False
             SYNC_LIKED_LISTS = False
             SYNC_WATCHLISTS = False
+            HISTORY_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+            LISTS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+            WATCHLISTS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
             logger.info(
                 "Restricted sync options disabled for managed user: %s",
                 selected_user.get("username", "Unknown"),
@@ -2273,6 +2295,9 @@ def index():
         liked_lists=display_liked_lists,
         watchlists=display_watchlists,
         live_sync=display_live_sync,
+        history_direction=HISTORY_SYNC_DIRECTION,
+        lists_direction=LISTS_SYNC_DIRECTION,
+        watchlists_direction=WATCHLISTS_SYNC_DIRECTION,
         provider=SYNC_PROVIDER,
         message=message,
         mtype=mtype,
