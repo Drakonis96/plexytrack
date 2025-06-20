@@ -469,6 +469,38 @@ def sync_ratings(plex, headers):
         logger.info("No Plex ratings to sync")
 
 
+def apply_trakt_ratings(plex, headers):
+    """Apply ratings from Trakt to matching Plex items."""
+    ratings = fetch_trakt_ratings(headers)
+    count = 0
+    for item in ratings:
+        typ = item.get("type")
+        data = item.get(typ, {}) if typ else {}
+        ids = data.get("ids", {})
+        rating = item.get("rating")
+        if rating is None:
+            continue
+        guid = None
+        if ids.get("imdb"):
+            guid = f"imdb://{ids['imdb']}"
+        elif ids.get("tmdb"):
+            guid = f"tmdb://{ids['tmdb']}"
+        elif ids.get("tvdb"):
+            guid = f"tvdb://{ids['tvdb']}"
+        if not guid:
+            continue
+        plex_item = find_item_by_guid(plex, guid)
+        if not plex_item:
+            continue
+        try:
+            plex_item.rate(float(rating))
+            count += 1
+        except Exception as exc:
+            logger.debug("Failed to rate item %s: %s", guid, exc)
+    if count:
+        logger.info("Applied %d ratings from Trakt to Plex", count)
+
+
 def sync_liked_lists(plex, headers):
     try:
         likes = trakt_request("GET", "/users/likes/lists", headers).json()

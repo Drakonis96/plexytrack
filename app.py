@@ -69,6 +69,7 @@ from trakt_utils import (
     fetch_trakt_history_full,
     fetch_trakt_ratings,
     fetch_trakt_watchlist,
+    apply_trakt_ratings,
     restore_backup,
 )
 from simkl_utils import (
@@ -137,6 +138,8 @@ DIRECTION_SERVICE_TO_PLEX = "service_to_plex"
 HISTORY_SYNC_DIRECTION = DIRECTION_BOTH
 LISTS_SYNC_DIRECTION = DIRECTION_BOTH
 WATCHLISTS_SYNC_DIRECTION = DIRECTION_BOTH
+RATINGS_SYNC_DIRECTION = DIRECTION_BOTH
+COLLECTION_SYNC_DIRECTION = DIRECTION_BOTH
 
 # Global storage for session-based Plex credentials (for scheduler access)
 session_plex_credentials = {
@@ -2019,14 +2022,24 @@ def sync():
     except Exception as exc:  # noqa: BLE001
         logger.error("Error during sync: %s", exc)
 
-    # Sincronizar valoraciones solo es compatible con Trakt por ahora
-    if SYNC_RATINGS and SYNC_PROVIDER == "trakt":
-        if stop_event.is_set():
-            logger.info("Sync cancelled")
-            return
-        sync_ratings(plex, headers)
-    elif SYNC_RATINGS and SYNC_PROVIDER == "simkl":
-        logger.warning("Ratings sync with Simkl is not yet supported.")
+    # Ratings sync
+    if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
+        if SYNC_PROVIDER == "trakt":
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+            sync_ratings(plex, headers)
+        elif SYNC_PROVIDER == "simkl":
+            logger.warning("Ratings sync with Simkl is not yet supported.")
+
+    if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
+        if SYNC_PROVIDER == "trakt" and selected_user.get("is_owner", False):
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+            apply_trakt_ratings(plex, headers)
+        elif SYNC_PROVIDER == "simkl":
+            logger.warning("Ratings import from Simkl is not yet supported.")
 
     if SYNC_WATCHLISTS and SYNC_PROVIDER == "trakt":
         if stop_event.is_set():
@@ -2036,11 +2049,14 @@ def sync():
     elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
 
-    if SYNC_COLLECTION:
+    if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
         sync_collection(plex, headers)
+
+    if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
+        logger.warning("Collection import from Trakt is not implemented.")
 
     if SYNC_LIKED_LISTS and SYNC_PROVIDER == "trakt":
         if stop_event.is_set():
@@ -2205,7 +2221,7 @@ def restore_backup(headers, data: dict) -> None:
 @app.route("/", methods=["GET", "POST"])
 def index():
     global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
-    global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION
+    global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
 
     load_trakt_tokens()
     load_simkl_tokens()
@@ -2225,6 +2241,8 @@ def index():
         HISTORY_SYNC_DIRECTION = request.form.get("history_direction", DIRECTION_BOTH)
         LISTS_SYNC_DIRECTION = request.form.get("lists_direction", DIRECTION_BOTH)
         WATCHLISTS_SYNC_DIRECTION = request.form.get("watchlists_direction", DIRECTION_BOTH)
+        RATINGS_SYNC_DIRECTION = request.form.get("ratings_direction", DIRECTION_BOTH)
+        COLLECTION_SYNC_DIRECTION = request.form.get("collection_direction", DIRECTION_BOTH)
 
         # Check if a managed user is selected and restrict options
         selected_user = load_selected_user()
@@ -2236,6 +2254,8 @@ def index():
             HISTORY_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
             LISTS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
             WATCHLISTS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+            RATINGS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+            COLLECTION_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
             logger.info(
                 "Restricted sync options disabled for managed user: %s",
                 selected_user.get("username", "Unknown"),
@@ -2298,6 +2318,8 @@ def index():
         history_direction=HISTORY_SYNC_DIRECTION,
         lists_direction=LISTS_SYNC_DIRECTION,
         watchlists_direction=WATCHLISTS_SYNC_DIRECTION,
+        ratings_direction=RATINGS_SYNC_DIRECTION,
+        collection_direction=COLLECTION_SYNC_DIRECTION,
         provider=SYNC_PROVIDER,
         message=message,
         mtype=mtype,

@@ -201,7 +201,7 @@ After selecting a user, you'll see a confirmation message indicating that the us
 
 ## Personalized Sync Direction
 
-Owner users can choose how each sync type flows between Plex and the selected provider. For Watched History, Liked Lists and Watchlists you may select:
+Owner users can choose how each sync type flows between Plex and the selected provider. For Watched History, Liked Lists, Watchlists, Collections and Ratings you may select:
 
 - **Bidirectional** – changes are mirrored both ways.
 - **Plex → Trakt/Simkl** – only send data from Plex to the service.
