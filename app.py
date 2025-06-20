@@ -2300,6 +2300,13 @@ def index():
     display_watchlists = SYNC_WATCHLISTS
     display_live_sync = LIVE_SYNC
 
+    if SYNC_PROVIDER == "simkl":
+        display_collection = False
+        display_ratings = False
+        display_liked_lists = False
+        display_watchlists = False
+        display_live_sync = False
+
     if selected_user and not selected_user.get("is_owner", False):
         # Disable restricted options in the UI for managed users
         display_collection = False
