@@ -199,6 +199,16 @@ When using PlexyTrack with multiple Plex users (owner and managed users), you ca
 
 After selecting a user, you'll see a confirmation message indicating that the user was selected successfully. Each user's history is synchronized independently and always with a **full sync** to ensure complete data integrity across Plex, Trakt and Simkl.
 
+## Personalized Sync Direction
+
+Owner users can choose how each sync type flows between Plex and the selected provider. For Watched History, Liked Lists, Watchlists, Collections and Ratings you may select:
+
+- **Bidirectional** – changes are mirrored both ways.
+- **Plex → Trakt/Simkl** – only send data from Plex to the service.
+- **Trakt/Simkl → Plex** – only import data from the service into Plex.
+
+Managed users always use the Plex → service direction.
+
 ## Screenshots
 
 Below are a few images of the PlexyTrack web interface.

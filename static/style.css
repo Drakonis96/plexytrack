@@ -244,6 +244,13 @@ body {
     color: #888;
 }
 
+/* Direction select */
+.direction-select {
+    margin-left: 10px;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
 /* Provider toggle */
 .provider-toggle {
     display: flex;

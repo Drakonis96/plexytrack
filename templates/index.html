@@ -120,22 +120,47 @@
                         <div class="checkbox-group">
                             <input type="checkbox" id="collection" name="collection" {% if collection %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
                             <label for="collection">Collection</label>
+                            <select id="collection_direction" name="collection_direction" class="direction-select">
+                                <option value="both" {% if collection_direction == 'both' %}selected{% endif %}>Bidirectional</option>
+                                <option value="plex_to_service" {% if collection_direction == 'plex_to_service' %}selected{% endif %}>Plex → {{ provider.capitalize() }}</option>
+                                <option value="service_to_plex" {% if collection_direction == 'service_to_plex' %}selected{% endif %}>{{ provider.capitalize() }} → Plex</option>
+                            </select>
                         </div>
                         <div class="checkbox-group">
                             <input type="checkbox" id="ratings" name="ratings" {% if ratings %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
                             <label for="ratings">Ratings</label>
+                            <select id="ratings_direction" name="ratings_direction" class="direction-select">
+                                <option value="both" {% if ratings_direction == 'both' %}selected{% endif %}>Bidirectional</option>
+                                <option value="plex_to_service" {% if ratings_direction == 'plex_to_service' %}selected{% endif %}>Plex → {{ provider.capitalize() }}</option>
+                                <option value="service_to_plex" {% if ratings_direction == 'service_to_plex' %}selected{% endif %}>{{ provider.capitalize() }} → Plex</option>
+                            </select>
                         </div>
                         <div class="checkbox-group">
                             <input type="checkbox" id="watched" name="watched" {% if watched %}checked{% endif %}>
                             <label for="watched">Watched History</label>
+                            <select id="history_direction" name="history_direction" class="direction-select">
+                                <option value="both" {% if history_direction == 'both' %}selected{% endif %}>Bidirectional</option>
+                                <option value="plex_to_service" {% if history_direction == 'plex_to_service' %}selected{% endif %}>Plex → {{ provider.capitalize() }}</option>
+                                <option value="service_to_plex" {% if history_direction == 'service_to_plex' %}selected{% endif %}>{{ provider.capitalize() }} → Plex</option>
+                            </select>
                         </div>
                         <div class="checkbox-group">
                             <input type="checkbox" id="liked_lists" name="liked_lists" {% if liked_lists %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
                             <label for="liked_lists">Liked Lists</label>
+                            <select id="lists_direction" name="lists_direction" class="direction-select">
+                                <option value="both" {% if lists_direction == 'both' %}selected{% endif %}>Bidirectional</option>
+                                <option value="plex_to_service" {% if lists_direction == 'plex_to_service' %}selected{% endif %}>Plex → {{ provider.capitalize() }}</option>
+                                <option value="service_to_plex" {% if lists_direction == 'service_to_plex' %}selected{% endif %}>{{ provider.capitalize() }} → Plex</option>
+                            </select>
                         </div>
                         <div class="checkbox-group">
                             <input type="checkbox" id="watchlists" name="watchlists" {% if watchlists %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
                             <label for="watchlists">Watchlists</label>
+                            <select id="watchlists_direction" name="watchlists_direction" class="direction-select">
+                                <option value="both" {% if watchlists_direction == 'both' %}selected{% endif %}>Bidirectional</option>
+                                <option value="plex_to_service" {% if watchlists_direction == 'plex_to_service' %}selected{% endif %}>Plex → {{ provider.capitalize() }}</option>
+                                <option value="service_to_plex" {% if watchlists_direction == 'service_to_plex' %}selected{% endif %}>{{ provider.capitalize() }} → Plex</option>
+                            </select>
                         </div>
                         <div class="checkbox-group">
                             <input type="checkbox" id="live_sync" name="live_sync" {% if live_sync %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
@@ -241,6 +266,7 @@
         // Update sync options based on user type
         function updateSyncOptionsForUser(user) {
             const restrictedOptions = ['collection', 'liked_lists', 'watchlists'];
+            const directionOptions = ['history_direction','lists_direction','watchlists_direction','ratings_direction','collection_direction'];
             const isManagedUser = user && !user.is_owner;
             
             restrictedOptions.forEach(option => {
@@ -266,6 +292,18 @@
                                 label.style.cursor = 'pointer';
                             }
                         }
+                    }
+                }
+            });
+
+            directionOptions.forEach(opt => {
+                const select = document.getElementById(opt);
+                if (select) {
+                    if (isManagedUser) {
+                        select.disabled = true;
+                        select.value = 'plex_to_service';
+                    } else {
+                        select.disabled = false;
                     }
                 }
             });
