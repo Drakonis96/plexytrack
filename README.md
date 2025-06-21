@@ -90,10 +90,12 @@ If you don't already have the Trakt or Simkl credentials, please see the next se
 
    ```
    # Example .env
-   PLEX_EMAIL=you@example.com
-   PLEX_PASSWORD=your_password
+   PLEX_BASEURL=your_plex_base_url
+   PLEX_TOKEN=your_plex_token
    TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
    TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
+   SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID
+   SIMKL_CLIENT_SECRET=YOUR_SIMKL_CLIENT_SECRET
    # ...other variables...
    TZ=Europe/Madrid
    ```
@@ -154,13 +156,13 @@ the application will trigger an immediate sync whenever an event is received.
 2. Create a `.env` file in the project root and define the variables listed above. Example:
 
 ```
-# Plex Authentication - Credentials method (recommended)
 PLEX_BASEURL=your_plex_base_url
 PLEX_TOKEN=your_plex_token
-PLEX_EMAIL=your_plex_email@example.com #Better to provide it through the webUI
-PLEX_PASSWORD=your_plex_password #Better to provide it through the webUI
-# PLEX_2FA_CODE=123456  # Only if 2FA is enabled and better to provide it through the webUI
-# PLEX_SERVER_NAME=MyServer  # Only if you have multiple servers, but still, better to provide it through the webUI
+
+#PLEX_EMAIL=your_plex_email@example.com #Better to provide it through the webUI
+#PLEX_PASSWORD=your_plex_password #Better to provide it through the webUI
+#PLEX_2FA_CODE=123456  # Only if 2FA is enabled and better to provide it through the webUI
+#PLEX_SERVER_NAME=MyServer  # Only if you have multiple servers, but still, better to provide it through the webUI
 
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
