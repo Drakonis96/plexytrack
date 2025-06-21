@@ -36,7 +36,7 @@ This application is currently in testing and is provided **as is**. I take no re
 
 The application expects the following API credentials:
 
-### Plex Authentication (Primary Method)
+### Plex Authentication
 
 - `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
 - `PLEX_TOKEN` – your Plex authentication token.
