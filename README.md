@@ -85,17 +85,20 @@ If you don't already have the Trakt or Simkl credentials, please see the next se
 ## Quick Start
 
 1. Install **Docker Desktop** (Windows/macOS) or `docker` and `docker-compose` (Linux).
-2. [Download](https://github.com/) or clone this repository and open a terminal inside the folder.
+2. [Download]([https://github.com/](https://github.com/Drakonis96/plexytrack)) or clone this repository and open a terminal inside the folder.
 3. Create a file named `.env` and paste your Plex, Trakt or Simkl details as shown below:
 
    ```
    # Example .env
    PLEX_BASEURL=your_plex_base_url
    PLEX_TOKEN=your_plex_token
+   
    TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
    TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
+   
    SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID
    SIMKL_CLIENT_SECRET=YOUR_SIMKL_CLIENT_SECRET
+   
    # ...other variables...
    TZ=Europe/Madrid
    ```
@@ -166,12 +169,14 @@ PLEX_TOKEN=your_plex_token
 
 TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
 TRAKT_CLIENT_SECRET=YOUR_TRAKT_CLIENT_SECRET
+
 SIMKL_CLIENT_ID=YOUR_SIMKL_CLIENT_ID
 SIMKL_CLIENT_SECRET=YOUR_SIMKL_CLIENT_SECRET
 
 # Optional custom redirect URIs
 # TRAKT_REDIRECT_URI=http://localhost:5030/oauth/trakt
 # SIMKL_REDIRECT_URI=http://localhost:5030/oauth/simkl
+
 TZ=Europe/Madrid
 ```
 
