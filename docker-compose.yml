@@ -13,3 +13,6 @@ services:
       - TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET}
       - SIMKL_CLIENT_ID=${SIMKL_CLIENT_ID}
       - SIMKL_CLIENT_SECRET=${SIMKL_CLIENT_SECRET}
+      - PLEXYTRACK_DATA_DIR=/data
+    volumes:
+      - ./data:/data

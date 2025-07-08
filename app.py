@@ -26,6 +26,7 @@ from flask import (
     has_request_context,
     jsonify,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 from flask import send_file, session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
@@ -114,6 +115,9 @@ USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 # FLASK + APSCHEDULER
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
+# Honor X-Forwarded headers when running behind a reverse proxy so that
+# request.url_root uses the external address and scheme.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-change-in-production')
 
 SYNC_INTERVAL_MINUTES = 60  # default frequency
@@ -124,7 +128,10 @@ SYNC_LIKED_LISTS = False
 SYNC_WATCHLISTS = False
 LIVE_SYNC = False
 SYNC_PROVIDER = "none"  # trakt | simkl | none
-PROVIDER_FILE = "provider.json"
+# Directory used to store tokens and settings
+DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
+os.makedirs(DATA_DIR, exist_ok=True)
+PROVIDER_FILE = os.path.join(DATA_DIR, "provider.json")
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
 plex_account = None  # will hold MyPlexAccount instance
@@ -157,11 +164,9 @@ stop_event = Event()
 # --------------------------------------------------------------------------- #
 # TRAKT / SIMKL OAUTH CONSTANTS
 # --------------------------------------------------------------------------- #
-TRAKT_REDIRECT_URI = os.environ.get("TRAKT_REDIRECT_URI")
-TOKEN_FILE = "trakt_tokens.json"
-
-SIMKL_REDIRECT_URI = os.environ.get("SIMKL_REDIRECT_URI")
-SIMKL_TOKEN_FILE = "simkl_tokens.json"
+TOKEN_FILE = os.path.join(DATA_DIR, "trakt_tokens.json")
+SIMKL_TOKEN_FILE = os.path.join(DATA_DIR, "simkl_tokens.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +196,64 @@ def save_provider(provider: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# PERSISTENT SETTINGS
+# --------------------------------------------------------------------------- #
+def load_settings() -> None:
+    """Load sync settings from :data:`SETTINGS_FILE` if present."""
+    global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED
+    global SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
+    global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION
+    global WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            SYNC_INTERVAL_MINUTES = int(data.get("minutes", SYNC_INTERVAL_MINUTES))
+            SYNC_COLLECTION = data.get("collection", SYNC_COLLECTION)
+            SYNC_RATINGS = data.get("ratings", SYNC_RATINGS)
+            SYNC_WATCHED = data.get("watched", SYNC_WATCHED)
+            SYNC_LIKED_LISTS = data.get("liked_lists", SYNC_LIKED_LISTS)
+            SYNC_WATCHLISTS = data.get("watchlists", SYNC_WATCHLISTS)
+            LIVE_SYNC = data.get("live_sync", LIVE_SYNC)
+            HISTORY_SYNC_DIRECTION = data.get("history_direction", HISTORY_SYNC_DIRECTION)
+            LISTS_SYNC_DIRECTION = data.get("lists_direction", LISTS_SYNC_DIRECTION)
+            WATCHLISTS_SYNC_DIRECTION = data.get(
+                "watchlists_direction", WATCHLISTS_SYNC_DIRECTION
+            )
+            RATINGS_SYNC_DIRECTION = data.get("ratings_direction", RATINGS_SYNC_DIRECTION)
+            COLLECTION_SYNC_DIRECTION = data.get(
+                "collection_direction", COLLECTION_SYNC_DIRECTION
+            )
+            logger.info("Loaded sync settings from %s", SETTINGS_FILE)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load settings: %s", exc)
+
+
+def save_settings() -> None:
+    """Persist current sync settings to :data:`SETTINGS_FILE`."""
+    data = {
+        "minutes": SYNC_INTERVAL_MINUTES,
+        "collection": SYNC_COLLECTION,
+        "ratings": SYNC_RATINGS,
+        "watched": SYNC_WATCHED,
+        "liked_lists": SYNC_LIKED_LISTS,
+        "watchlists": SYNC_WATCHLISTS,
+        "live_sync": LIVE_SYNC,
+        "history_direction": HISTORY_SYNC_DIRECTION,
+        "lists_direction": LISTS_SYNC_DIRECTION,
+        "watchlists_direction": WATCHLISTS_SYNC_DIRECTION,
+        "ratings_direction": RATINGS_SYNC_DIRECTION,
+        "collection_direction": COLLECTION_SYNC_DIRECTION,
+    }
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        logger.info("Saved sync settings to %s", SETTINGS_FILE)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save settings: %s", exc)
+
+
+# --------------------------------------------------------------------------- #
 # CUSTOM EXCEPTIONS
 # --------------------------------------------------------------------------- #
 class TraktAccountLimitError(Exception):
@@ -201,23 +264,21 @@ class TraktAccountLimitError(Exception):
 
 def get_trakt_redirect_uri() -> str:
     """Return the Trakt redirect URI derived from the current request."""
-    global TRAKT_REDIRECT_URI
-    if TRAKT_REDIRECT_URI:
-        return TRAKT_REDIRECT_URI
+    uri = os.environ.get("TRAKT_REDIRECT_URI")
+    if uri:
+        return uri
     if has_request_context():
-        TRAKT_REDIRECT_URI = request.url_root.rstrip("/") + "/oauth/trakt"
-        return TRAKT_REDIRECT_URI
+        return request.url_root.rstrip("/") + "/oauth/trakt"
     return "http://localhost:5030/oauth/trakt"
 
 
 def get_simkl_redirect_uri() -> str:
     """Return the Simkl redirect URI derived from the current request."""
-    global SIMKL_REDIRECT_URI
-    if SIMKL_REDIRECT_URI:
-        return SIMKL_REDIRECT_URI
+    uri = os.environ.get("SIMKL_REDIRECT_URI")
+    if uri:
+        return uri
     if has_request_context():
-        SIMKL_REDIRECT_URI = request.url_root.rstrip("/") + "/oauth/simkl"
-        return SIMKL_REDIRECT_URI
+        return request.url_root.rstrip("/") + "/oauth/simkl"
     return "http://localhost:5030/oauth/simkl"
 
 
@@ -2226,6 +2287,7 @@ def index():
     load_trakt_tokens()
     load_simkl_tokens()
     load_provider()
+    load_settings()
 
     # Change interval and start sync when requested
     if request.method == "POST":
@@ -2267,6 +2329,9 @@ def index():
             SYNC_LIKED_LISTS = False
             SYNC_WATCHLISTS = False
             LIVE_SYNC = False
+
+        # Persist final settings to disk after applying restrictions
+        save_settings()
         
         # Only start scheduler when manually requested from sync tab
         # Check if a user is selected first
@@ -3159,7 +3224,7 @@ def stop_scheduler():
 # --------------------------------------------------------------------------- #
 # USER SELECTION FOR SYNC
 # --------------------------------------------------------------------------- #
-SELECTED_USER_FILE = "selected_user.json"
+SELECTED_USER_FILE = os.path.join(DATA_DIR, "selected_user.json")
 
 def load_selected_user():
     """Load selected user information from file."""
@@ -3531,6 +3596,7 @@ if __name__ == "__main__":
     load_trakt_tokens()
     load_simkl_tokens()
     load_provider()
+    load_settings()
     # Removed automatic scheduler start - only manual start from sync tab
     # start_scheduler()
     # Disable Flask's auto-reloader to avoid duplicate logs

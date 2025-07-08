@@ -44,20 +44,14 @@ def save_trakt_tokens(access_token: str, refresh_token: Optional[str]) -> None:
 
 
 def get_trakt_redirect_uri() -> str:
-    global TRAKT_REDIRECT_URI
-    if 'TRAKT_REDIRECT_URI' in globals() and TRAKT_REDIRECT_URI:
-        return TRAKT_REDIRECT_URI
-    TRAKT_REDIRECT_URI = os.environ.get("TRAKT_REDIRECT_URI")
-    if TRAKT_REDIRECT_URI:
-        return TRAKT_REDIRECT_URI
+    """Return the Trakt redirect URI for the current request."""
+    uri = os.environ.get("TRAKT_REDIRECT_URI")
+    if uri:
+        return uri
     try:
-        try:
-            from flask import has_request_context, request
-            if has_request_context():
-                TRAKT_REDIRECT_URI = request.url_root.rstrip("/") + "/oauth/trakt"
-                return TRAKT_REDIRECT_URI
-        except (ImportError, AttributeError):
-            pass
+        from flask import has_request_context, request
+        if has_request_context():
+            return request.url_root.rstrip("/") + "/oauth/trakt"
     except Exception:
         pass
     return "http://localhost:5030/oauth/trakt"
