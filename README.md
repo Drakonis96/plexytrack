@@ -72,11 +72,20 @@ for you.
 Authorization codes will appear in the **OAuth** tab and can then be entered from the **Config.** tab, which shows whether each service is already configured.
 If you want to remove saved tokens, the Config page also provides **Clear Config** buttons for both Trakt and Simkl.
 
+All sync options and the chosen Plex user are saved to `settings.json` and
+`selected_user.json` so your configuration persists across restarts.
+When running PlexyTrack in Docker, mount a host directory and set
+`PLEXYTRACK_DATA_DIR` to that path (for example `/data`) so the tokens and
+settings survive container re-creation.
+
 
 When specifying a custom redirect URI for either service, ensure the same
 value is configured in your Trakt or Simkl application and passed via the
 `TRAKT_REDIRECT_URI` or `SIMKL_REDIRECT_URI` environment variables.
-If PlexyTrack is accessed through a reverse proxy, add both `https` and `http` versions of the OAuth redirect URL to avoid failures. For example, use `https://example.com/oauth/trakt` and `http://example.com/oauth/trakt` and set the same when creating the Simkl application.
+PlexyTrack now honours the `X-Forwarded-Proto` and `X-Forwarded-Host` headers,
+so when running behind a reverse proxy the correct redirect URI is detected
+automatically. Set a redirect URI explicitly only when you need to override the
+auto-detected value.
 
 The application uses `plexapi` version 4.15 or newer (but below 5).
 
@@ -178,7 +187,12 @@ SIMKL_CLIENT_SECRET=YOUR_SIMKL_CLIENT_SECRET
 # SIMKL_REDIRECT_URI=http://localhost:5030/oauth/simkl
 
 TZ=Europe/Madrid
+# Directory to store tokens and settings
+PLEXYTRACK_DATA_DIR=/data
 ```
+
+Make sure a `data/` folder exists next to the compose file so the container can
+persist its configuration.
 
 3. Start the application using Docker Compose. The default `docker-compose.yml`
    pulls the image from Docker Hub:

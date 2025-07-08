@@ -3,3 +3,6 @@ __pycache__/
 output.log
 trakt_tokens.json
 simkl_tokens.json
+provider.json
+selected_user.json
+settings.json
