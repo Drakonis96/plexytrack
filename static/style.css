@@ -29,6 +29,7 @@ body {
     color: #ecf0f1; /* Light gray */
     padding: 20px 30px;
     display: flex;
+    position: relative;
     align-items: center;
     justify-content: space-between;
     border-bottom: 4px solid #3498db; /* Bright blue accent */
@@ -44,6 +45,16 @@ body {
     margin: 0;
     font-size: 2em;
     font-weight: 700;
+}
+
+/* Hamburger toggle button */
+.nav-toggle {
+    display: none;
+    background: none;
+    border: none;
+    color: #ecf0f1;
+    font-size: 1.8em;
+    cursor: pointer;
 }
 
 /* Navigation */
@@ -462,9 +473,23 @@ form button[type="submit"],
         height: 40px;
     }
 
+    .nav-toggle {
+        display: block;
+        position: absolute;
+        top: 20px;
+        right: 20px;
+    }
+
     .app-nav {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
         margin-top: 15px;
-        justify-content: center;
+        width: 100%;
+    }
+
+    .app-nav.open {
+        display: flex;
     }
 
     .content-area {
@@ -499,8 +524,9 @@ form button[type="submit"],
     }
 
     .nav-link {
-        padding: 6px 10px;
+        padding: 10px 0;
         font-size: 0.9em;
+        text-align: center;
     }
 
     .form-input,
