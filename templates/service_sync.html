@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlexyTrack - Service Sync</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
+            <h1>PlexyTrack</h1>
+            <nav class="app-nav">
+                <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
+                <a href="{{ url_for('service_sync_page') }}" class="nav-link active">Service Sync</a>
+                <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
+                <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
+                <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
+                <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
+                <button id="logoutBtn" class="btn-logout">Log Out</button>
+            </nav>
+        </header>
+
+        <main class="content-area">
+            <section class="card">
+                <h2>Service Migration</h2>
+                <p class="description">Copy watched history from one service to the other.</p>
+                <form method="post" class="sync-form" style="margin-bottom:20px;">
+                    <input type="hidden" name="direction" value="trakt_to_simkl">
+                    <button type="submit" class="button primary">Sync Trakt → Simkl</button>
+                </form>
+                <form method="post" class="sync-form">
+                    <input type="hidden" name="direction" value="simkl_to_trakt">
+                    <button type="submit" class="button primary">Sync Simkl → Trakt</button>
+                </form>
+            </section>
+            <div id="confirmationMessage" class="status-message {% if mtype == 'success' %}success{% elif mtype == 'error' %}error{% endif %}" {% if not message %}style="display:none;"{% endif %}>{{ message }}</div>
+        </main>
+
+        <footer class="app-footer">
+            <p>MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
+        </footer>
+    </div>
+    <script src="{{ url_for('static', filename='logout.js') }}"></script>
+    <script>
+        const msg = document.getElementById('confirmationMessage');
+        if (msg && msg.textContent.trim() !== '') {
+            setTimeout(function() { msg.style.display = 'none'; }, 5000);
+        }
+    </script>
+</body>
+</html>

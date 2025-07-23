@@ -2599,6 +2599,86 @@ def restore_backup_route():
     return redirect(url_for("backup_page", message="Backup restored", mtype="success"))
 
 
+@app.route("/service_sync", methods=["GET", "POST"])
+def service_sync_page():
+    """Synchronize history between Trakt and Simkl."""
+    load_trakt_tokens()
+    load_simkl_tokens()
+
+    message = None
+    mtype = "success"
+
+    if request.method == "POST":
+        direction = request.form.get("direction")
+
+        trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
+        trakt_client_id = os.environ.get("TRAKT_CLIENT_ID")
+        simkl_token = os.environ.get("SIMKL_ACCESS_TOKEN")
+        simkl_client_id = os.environ.get("SIMKL_CLIENT_ID")
+
+        if direction == "trakt_to_simkl":
+            if not (trakt_token and trakt_client_id and simkl_token and simkl_client_id):
+                message = "Missing Trakt or Simkl credentials"
+                mtype = "error"
+            else:
+                trakt_headers = {
+                    "Authorization": f"Bearer {trakt_token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": USER_AGENT,
+                    "trakt-api-version": "2",
+                    "trakt-api-key": trakt_client_id,
+                }
+                simkl_headers = {
+                    "Authorization": f"Bearer {simkl_token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": USER_AGENT,
+                    "simkl-api-key": simkl_client_id,
+                }
+                try:
+                    from migration_utils import trakt_to_simkl
+
+                    trakt_to_simkl(trakt_headers, simkl_headers)
+                    message = "Trakt history synced to Simkl"
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Service sync failed: %s", exc)
+                    message = "Service sync failed"
+                    mtype = "error"
+
+        elif direction == "simkl_to_trakt":
+            if not (trakt_token and trakt_client_id and simkl_token and simkl_client_id):
+                message = "Missing Trakt or Simkl credentials"
+                mtype = "error"
+            else:
+                trakt_headers = {
+                    "Authorization": f"Bearer {trakt_token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": USER_AGENT,
+                    "trakt-api-version": "2",
+                    "trakt-api-key": trakt_client_id,
+                }
+                simkl_headers = {
+                    "Authorization": f"Bearer {simkl_token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": USER_AGENT,
+                    "simkl-api-key": simkl_client_id,
+                }
+                try:
+                    from migration_utils import simkl_to_trakt
+
+                    simkl_to_trakt(simkl_headers, trakt_headers)
+                    message = "Simkl history synced to Trakt"
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Service sync failed: %s", exc)
+                    message = "Service sync failed"
+                    mtype = "error"
+
+        else:
+            message = "Invalid sync direction"
+            mtype = "error"
+
+    return render_template("service_sync.html", message=message, mtype=mtype)
+
+
 @app.route("/webhook", methods=["POST"])
 def plex_webhook():
     """Handle Plex webhook events for live synchronization."""
