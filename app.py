@@ -3371,9 +3371,19 @@ def mark_as_watched_for_user(
         # Validate item type matches expectation
         actual_type = getattr(item, 'TYPE', 'unknown')
         if item_type == "movie" and actual_type != "movie":
-            logger.warning("Type mismatch: expected movie but found %s for %s", actual_type, item.title)
+            logger.warning(
+                "Type mismatch: expected movie but found %s for %s. Skipping",
+                actual_type,
+                item.title,
+            )
+            return False
         elif item_type == "episode" and actual_type != "episode":
-            logger.warning("Type mismatch: expected episode but found %s for %s", actual_type, item.title)
+            logger.warning(
+                "Type mismatch: expected episode but found %s for %s. Skipping",
+                actual_type,
+                item.title,
+            )
+            return False
             
         # Check if already watched
         if hasattr(item, 'isWatched') and item.isWatched:
