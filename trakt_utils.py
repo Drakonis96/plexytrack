@@ -334,11 +334,61 @@ def update_trakt(headers: dict, movies: list, episodes: list) -> None:
         len(payload["episodes"]),
         len(payload.get("shows", [])),
     )
-    try:
-        trakt_request("POST", "/sync/history", headers, json=payload)
-        logger.info("Trakt history updated successfully.")
-    except requests.exceptions.RequestException as e:
-        logger.error("Failed to update Trakt history: %s", e)
+
+    def chunk_list(items: List[dict], size: int = 500) -> List[List[dict]]:
+        """Split ``items`` into chunks of ``size`` items."""
+        return [items[i : i + size] for i in range(0, len(items), size)]
+
+    movie_chunks = chunk_list(payload["movies"])
+    episode_chunks = chunk_list(payload["episodes"])
+    show_chunks = chunk_list(payload.get("shows", []))
+
+    max_batches = max(len(movie_chunks), len(episode_chunks), len(show_chunks))
+
+    for batch_num in range(max_batches):
+        batch_payload = {}
+        if batch_num < len(movie_chunks):
+            batch_payload["movies"] = movie_chunks[batch_num]
+        if batch_num < len(episode_chunks):
+            batch_payload["episodes"] = episode_chunks[batch_num]
+        if batch_num < len(show_chunks):
+            batch_payload["shows"] = show_chunks[batch_num]
+
+        # Retry up to 3 times for rate limit responses
+        retries = 3
+        while retries:
+            try:
+                trakt_request("POST", "/sync/history", headers, json=batch_payload)
+                logger.debug(
+                    "Sent Trakt history batch %d with %d movies, %d episodes, %d shows",
+                    batch_num + 1,
+                    len(batch_payload.get("movies", [])),
+                    len(batch_payload.get("episodes", [])),
+                    len(batch_payload.get("shows", [])),
+                )
+                break
+            except requests.exceptions.HTTPError as exc:
+                if (
+                    exc.response is not None
+                    and exc.response.status_code == 429
+                    and retries > 1
+                ):
+                    retry_after = int(exc.response.headers.get("Retry-After", "1"))
+                    logger.warning(
+                        "Trakt API rate limit reached. Retrying batch in %s seconds",
+                        retry_after,
+                    )
+                    time.sleep(retry_after)
+                    retries -= 1
+                    continue
+                raise
+            except requests.exceptions.RequestException as exc:
+                logger.error(
+                    "Failed to update Trakt history batch %d: %s", batch_num + 1, exc
+                )
+                raise
+
+    logger.info("Trakt history updated successfully.")
 
 
 def sync_collection(plex, headers):
