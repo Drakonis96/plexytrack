@@ -53,7 +53,18 @@ from utils import (
     trakt_episode_key,
     simkl_episode_key,
 )
-from plex_utils import get_plex_history, update_plex, get_user_plex_history, get_user_watch_counts, get_owner_watch_counts, get_managed_user_watch_counts, get_owner_plex_history, get_managed_user_plex_history
+from plex_utils import (
+    get_plex_history,
+    update_plex,
+    get_user_plex_history,
+    get_user_watch_counts,
+    get_owner_watch_counts,
+    get_managed_user_watch_counts,
+    get_owner_plex_history,
+    get_managed_user_plex_history,
+    load_last_plex_sync,
+    save_last_plex_sync,
+)
 from trakt_utils import (
     load_trakt_tokens,
     save_trakt_tokens,
@@ -2135,6 +2146,7 @@ def sync():
     elif SYNC_PROVIDER == "simkl":
         logger.warning("Plex Collections sync to Simkl is not yet supported.")
 
+    save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
     logger.info("Sync finished.")
 
 
@@ -3398,24 +3410,34 @@ def save_selected_user(user_data):
         return False
 
 def get_selected_user_history(mindate: Optional[str] = None):
-    """Get history for the currently selected user. Always performs full sync for reliability."""
+    """Get history for the currently selected user."""
     selected_user = load_selected_user()
     if not selected_user:
         logger.warning("No user selected for sync")
         return {}, {}
-    
+
     account = get_plex_account()
     if not account:
         logger.error("No Plex account available")
         return {}, {}
-    
-    # Always do full sync for Plex (ignore mindate) to ensure reliable episode detection
+
+    if mindate is None:
+        mindate = load_last_plex_sync()
+
     if selected_user["is_owner"]:
-        logger.debug("Getting full history for owner (full sync)")
-        return get_owner_plex_history(account, mindate=None)
+        logger.debug(
+            "Getting history for owner since %s", mindate or "beginning"
+        )
+        return get_owner_plex_history(account, mindate=mindate)
     else:
-        logger.debug("Getting full history for managed user %s (full sync)", selected_user["username"])
-        return get_managed_user_plex_history(account, selected_user["id"], mindate=None)
+        logger.debug(
+            "Getting history for managed user %s since %s",
+            selected_user["username"],
+            mindate or "beginning",
+        )
+        return get_managed_user_plex_history(
+            account, selected_user["id"], mindate=mindate
+        )
 
 # Cache for users to avoid repeated API calls
 _cached_users = None
