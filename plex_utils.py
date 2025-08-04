@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 from datetime import datetime
 from typing import Dict, Optional, Set, Tuple
 
@@ -11,6 +12,7 @@ from utils import (
     to_iso_z,
     valid_guid,
     find_item_by_guid,
+    safe_timestamp_compare,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,30 @@ _show_guid_cache: Dict[str, Optional[str]] = {}
 
 # Global cache for ratings from Plex library sections
 _ratings_cache: Dict[str, Dict[str, float]] = {}
+
+# File to persist the timestamp of the last successful Plex sync
+PLEX_SYNC_STATE_FILE = "plex_sync_state.json"
+
+
+def load_last_plex_sync() -> Optional[str]:
+    """Return the timestamp of the last successful Plex sync if available."""
+    if os.path.exists(PLEX_SYNC_STATE_FILE):
+        try:
+            with open(PLEX_SYNC_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("last_sync")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to load Plex sync state: %s", exc)
+    return None
+
+
+def save_last_plex_sync(timestamp: str) -> None:
+    """Persist ``timestamp`` as the last successful Plex sync time."""
+    try:
+        with open(PLEX_SYNC_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"last_sync": timestamp}, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to save Plex sync state: %s", exc)
 
 def reset_movie_guid_cache():
     """Reset the global movie GUID cache"""
@@ -122,15 +148,19 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
     movies: Dict[str, Dict[str, Optional[str]]] = {}
     episodes: Dict[str, Dict[str, Optional[str]]] = {}
 
-    # Plex always does full sync for reliable episode detection
-    logger.info("Fetching owner history using MyPlexAccount (full sync)...")
-    
+    logger.info(
+        "Fetching owner history using MyPlexAccount%s",
+        f" since {mindate}" if mindate else " (full sync)",
+    )
+
     try:
-        # Get all history for the owner (full sync)
-        history_items = account.history(maxresults=None)
-        
+        # Get owner history, optionally filtered by mindate
+        history_items = account.history(mindate=mindate, maxresults=None)
+
         for entry in history_items:
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+            if mindate and not safe_timestamp_compare(watched_at, mindate):
+                continue
 
             if entry.type == "movie":
                 try:
@@ -224,7 +254,14 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                 if not guid or guid in movies:
                                     continue
                                 # Buscar si hay historial para este ítem (solo para el owner)
-                                user_history_for_movie = list(plex_server.history(ratingKey=movie.ratingKey, maxresults=1, accountID=account.id))
+                                user_history_for_movie = list(
+                                    plex_server.history(
+                                        ratingKey=movie.ratingKey,
+                                        mindate=mindate,
+                                        maxresults=1,
+                                        accountID=account.id,
+                                    )
+                                )
                                 if user_history_for_movie:
                                     last_viewed = user_history_for_movie[0]
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
@@ -233,6 +270,10 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                     # Use dateAdded or updatedAt as fallback timestamp
                                     fallback_date = getattr(movie, 'updatedAt', None) or getattr(movie, 'addedAt', None)
                                     watched_at = to_iso_z(fallback_date)
+
+                                if mindate and not safe_timestamp_compare(watched_at, mindate):
+                                    continue
+
                                 movies[guid] = {
                                     "title": title,
                                     "year": year,
@@ -259,7 +300,14 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                 code = f"S{int(season_num):02d}E{int(episode_num):02d}"
                                 if not guid or not valid_guid(guid) or guid in episodes:
                                     continue
-                                user_history_for_ep = list(plex_server.history(ratingKey=episode.ratingKey, maxresults=1, accountID=account.id))
+                                user_history_for_ep = list(
+                                    plex_server.history(
+                                        ratingKey=episode.ratingKey,
+                                        mindate=mindate,
+                                        maxresults=1,
+                                        accountID=account.id,
+                                    )
+                                )
                                 if user_history_for_ep:
                                     last_viewed = user_history_for_ep[0]
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
@@ -268,6 +316,10 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                     # Use dateAdded or updatedAt as fallback timestamp
                                     fallback_date = getattr(episode, 'updatedAt', None) or getattr(episode, 'addedAt', None)
                                     watched_at = to_iso_z(fallback_date)
+
+                                if mindate and not safe_timestamp_compare(watched_at, mindate):
+                                    continue
+
                                 episodes[guid] = {
                                     "show": show_title,
                                     "code": code,
@@ -312,8 +364,11 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
     movies: Dict[str, Dict[str, Optional[str]]] = {}
     episodes: Dict[str, Dict[str, Optional[str]]] = {}
     
-    # Plex always does full sync for reliable episode detection
-    logger.info("Fetching history for managed user ID: %s using owner credentials (full sync)", user_id)
+    logger.info(
+        "Fetching history for managed user ID: %s using owner credentials%s",
+        user_id,
+        f" since {mindate}" if mindate else " (full sync)",
+    )
     
     try:
         # Find the managed user by ID to verify they exist
@@ -359,11 +414,15 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
         # Method 1: Get global history filtered by accountID (most reliable)
         try:
             logger.debug("Fetching global history filtered by accountID %s", user_id)
-            # Use owner's server to get all history filtered by managed user's accountID
-            history_items = plex_server.history(accountID=user_id, maxresults=None)
+            # Use owner's server to get history filtered by managed user's accountID
+            history_items = plex_server.history(
+                accountID=user_id, mindate=mindate, maxresults=None
+            )
             
             for entry in history_items:
                 watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+                if mindate and not safe_timestamp_compare(watched_at, mindate):
+                    continue
                 
                 if entry.type == "movie":
                     try:
@@ -438,28 +497,46 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
                         for movie in watched_movies:
                             try:
                                 # Check if this specific user has history for this movie
-                                user_history_for_movie = list(plex_server.history(ratingKey=movie.ratingKey, accountID=user_id, maxresults=1))
+                                user_history_for_movie = list(
+                                    plex_server.history(
+                                        ratingKey=movie.ratingKey,
+                                        accountID=user_id,
+                                        mindate=mindate,
+                                        maxresults=1,
+                                    )
+                                )
                                 
                                 # Only include if this specific user has actually watched it
                                 if user_history_for_movie:
                                     title = movie.title
                                     year = normalize_year(getattr(movie, "year", None))
                                     guid = get_cached_movie_guid(title, year, movie)
-                                    
+
                                     if not guid or guid in movies:
                                         continue
-                                    
+
                                     last_viewed = user_history_for_movie[0]
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
-                                    
+
                                     # If no timestamp in history, use fallback
                                     if not watched_at:
                                         fallback_date = getattr(movie, 'updatedAt', None) or getattr(movie, 'addedAt', None)
                                         watched_at = to_iso_z(fallback_date)
-                                        logger.debug("Added manually marked movie with fallback timestamp - Movie: %s (%s)", title, year)
+                                        logger.debug(
+                                            "Added manually marked movie with fallback timestamp - Movie: %s (%s)",
+                                            title,
+                                            year,
+                                        )
                                     else:
-                                        logger.debug("Added from section scan with history - Movie: %s (%s)", title, year)
-                                    
+                                        logger.debug(
+                                            "Added from section scan with history - Movie: %s (%s)",
+                                            title,
+                                            year,
+                                        )
+
+                                    if mindate and not safe_timestamp_compare(watched_at, mindate):
+                                        continue
+
                                     movies[guid] = {
                                         "title": title,
                                         "year": year,
@@ -482,34 +559,53 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
                         for episode in watched_episodes:
                             try:
                                 # Check if this specific user has history for this episode
-                                user_history_for_ep = list(plex_server.history(ratingKey=episode.ratingKey, accountID=user_id, maxresults=1))
+                                user_history_for_ep = list(
+                                    plex_server.history(
+                                        ratingKey=episode.ratingKey,
+                                        accountID=user_id,
+                                        mindate=mindate,
+                                        maxresults=1,
+                                    )
+                                )
                                 
                                 # Only include if this specific user has actually watched it
                                 if user_history_for_ep:
                                     season_num = getattr(episode, 'seasonNumber', None)
                                     episode_num = getattr(episode, 'episodeNumber', None)
                                     show_title = getattr(episode, 'grandparentTitle', None)
-                                    
+
                                     if None in (season_num, episode_num, show_title):
                                         continue
-                                        
+
                                     code = f"S{int(season_num):02d}E{int(episode_num):02d}"
                                     guid = imdb_guid(episode)
-                                    
+
                                     if not guid or not valid_guid(guid) or guid in episodes:
                                         continue
-                                    
+
                                     last_viewed = user_history_for_ep[0]
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
-                                    
+
                                     # If no timestamp in history, use fallback
                                     if not watched_at:
                                         fallback_date = getattr(episode, 'updatedAt', None) or getattr(episode, 'addedAt', None)
                                         watched_at = to_iso_z(fallback_date)
-                                        logger.debug("Added manually marked episode with fallback timestamp - Episode: %s %s", show_title, code)
+                                        logger.debug(
+                                            "Added manually marked episode with fallback timestamp - Episode: %s %s",
+                                            show_title,
+                                            code,
+                                        )
                                     else:
-                                        logger.debug("Added from section scan with history - Episode: %s %s", show_title, code)
-                                    
+                                        logger.debug(
+                                            "Added from section scan with history - Episode: %s %s",
+                                            show_title,
+        
+                                            code,
+                                        )
+
+                                    if mindate and not safe_timestamp_compare(watched_at, mindate):
+                                        continue
+
                                     episodes[guid] = {
                                         "show": show_title,
                                         "code": code,
@@ -628,16 +724,20 @@ def get_server_based_history(plex, mindate: Optional[str] = None) -> Tuple[
     """
     Fallback method using direct server access (legacy token method).
     This is the original implementation that works with PlexServer tokens.
-    Always does full sync for reliable episode detection.
+    Supports incremental sync via ``mindate`` when available.
     """
     movies: Dict[str, Dict[str, Optional[str]]] = {}
     episodes: Dict[str, Dict[str, Optional[str]]] = {}
 
-    # Plex always does full sync for reliable episode detection
-    logger.info("Fetching Plex history using server-based method (full sync)...")
+    logger.info(
+        "Fetching Plex history using server-based method%s",
+        f" since {mindate}" if mindate else " (full sync)",
+    )
     try:
-        for entry in plex.history():
+        for entry in plex.history(mindate=mindate):
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+            if mindate and not safe_timestamp_compare(watched_at, mindate):
+                continue
 
             if entry.type == "movie":
                 try:
@@ -712,10 +812,13 @@ def get_server_based_history(plex, mindate: Optional[str] = None) -> Tuple[
                         year = normalize_year(getattr(item, "year", None))
                         guid = get_cached_movie_guid(title, year, item)
                         if guid and guid not in movies:
+                            watched_at = to_iso_z(getattr(item, "lastViewedAt", None))
+                            if mindate and not safe_timestamp_compare(watched_at, mindate):
+                                continue
                             movies[guid] = {
                                 "title": title,
                                 "year": year,
-                                "watched_at": to_iso_z(getattr(item, "lastViewedAt", None)),
+                                "watched_at": watched_at,
                                 "guid": guid,
                             }
                 elif section.type == "show":
@@ -725,10 +828,13 @@ def get_server_based_history(plex, mindate: Optional[str] = None) -> Tuple[
                         show_title = getattr(ep, "grandparentTitle", None)
                         # Only store episodes with individual episode GUIDs
                         if guid and guid not in episodes:
+                            watched_at = to_iso_z(getattr(ep, "lastViewedAt", None))
+                            if mindate and not safe_timestamp_compare(watched_at, mindate):
+                                continue
                             episodes[guid] = {
                                 "show": show_title,
                                 "code": code,
-                                "watched_at": to_iso_z(getattr(ep, "lastViewedAt", None)),
+                                "watched_at": watched_at,
                                 "guid": guid,
                             }
             except Exception as exc:
