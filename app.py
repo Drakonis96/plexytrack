@@ -30,7 +30,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from flask import send_file, session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
-from threading import Event
+from threading import Event, Thread
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
@@ -2396,6 +2396,72 @@ def index():
         message=message,
         mtype=mtype,
         next_run=next_run,
+    )
+
+
+@app.route("/sync_once", methods=["POST"])
+def sync_once():
+    global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
+    global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
+
+    load_trakt_tokens()
+    load_simkl_tokens()
+    load_provider()
+    load_settings()
+
+    minutes = int(request.form.get("minutes", 60))
+    SYNC_INTERVAL_MINUTES = minutes
+    SYNC_COLLECTION = request.form.get("collection") is not None
+    SYNC_RATINGS = request.form.get("ratings") is not None
+    SYNC_WATCHED = request.form.get("watched") is not None
+    SYNC_LIKED_LISTS = request.form.get("liked_lists") is not None
+    SYNC_WATCHLISTS = request.form.get("watchlists") is not None
+    LIVE_SYNC = request.form.get("live_sync") is not None
+
+    HISTORY_SYNC_DIRECTION = request.form.get("history_direction", DIRECTION_BOTH)
+    LISTS_SYNC_DIRECTION = request.form.get("lists_direction", DIRECTION_BOTH)
+    WATCHLISTS_SYNC_DIRECTION = request.form.get("watchlists_direction", DIRECTION_BOTH)
+    RATINGS_SYNC_DIRECTION = request.form.get("ratings_direction", DIRECTION_BOTH)
+    COLLECTION_SYNC_DIRECTION = request.form.get("collection_direction", DIRECTION_BOTH)
+
+    selected_user = load_selected_user()
+    if selected_user and not selected_user.get("is_owner", False):
+        SYNC_COLLECTION = False
+        SYNC_LIKED_LISTS = False
+        SYNC_WATCHLISTS = False
+        HISTORY_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+        LISTS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+        WATCHLISTS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+        RATINGS_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+        COLLECTION_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
+        logger.info(
+            "Restricted sync options disabled for managed user: %s",
+            selected_user.get("username", "Unknown"),
+        )
+
+    if SYNC_PROVIDER == "simkl":
+        SYNC_COLLECTION = False
+        SYNC_RATINGS = False
+        SYNC_LIKED_LISTS = False
+        SYNC_WATCHLISTS = False
+        LIVE_SYNC = False
+
+    save_settings()
+
+    if not selected_user:
+        return redirect(
+            url_for("index", message="Please select a user first in the Users tab before starting sync!", mtype="error")
+        )
+
+    stop_event.clear()
+    Thread(target=sync).start()
+
+    return redirect(
+        url_for(
+            "index",
+            message=f"One-time sync started successfully for user: {selected_user['username']} ({selected_user['role']})!",
+            mtype="success",
+        )
     )
 
 

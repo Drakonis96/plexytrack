@@ -171,9 +171,13 @@
                     </fieldset>
                     
                     <div class="form-actions">
-                        <button type="submit" id="syncBtn" class="button primary">
+                        <button type="submit" id="scheduleBtn" class="button primary">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM10.6212 15.5354L12.0354 16.9496L16.9496 12.0354L15.5354 10.6212L12.0354 14.1212L9.20702 11.2928L7.79281 12.707L10.6212 15.5354Z"></path></svg>
-                            Start Sync
+                            Schedule Sync
+                        </button>
+                        <button type="submit" formaction="{{ url_for('sync_once') }}" id="syncOnceBtn" class="button primary">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM10.6212 15.5354L12.0354 16.9496L16.9496 12.0354L15.5354 10.6212L12.0354 14.1212L9.20702 11.2928L7.79281 12.707L10.6212 15.5354Z"></path></svg>
+                            Sync Once
                         </button>
                     </div>
                 </form>

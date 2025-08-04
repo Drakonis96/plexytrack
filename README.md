@@ -208,7 +208,7 @@ file:
 docker-compose -f docker-compose-local.yml up --build
 ```
 
-4. Visit `http://localhost:5030` in your browser. You can adjust the sync interval on the page. The **Start Sync** button schedules the job, while **Stop Sync** now immediately cancels any running sync and removes future scheduled jobs.
+4. Visit `http://localhost:5030` in your browser. You can adjust the sync interval on the page. Use **Sync Once** to run an immediate one-time sync—ideal for the initial sync of large libraries. Use **Schedule Sync** to set up a recurring job, and **Stop Sync** to immediately cancel any running or scheduled syncs.
 
    A sync interval of **at least 60 minutes is recommended**. Shorter intervals are generally unnecessary, and you can even schedule the job every 24 hours to reduce the load on your server and the Trakt or Simkl API.
 
