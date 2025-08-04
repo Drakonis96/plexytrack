@@ -10,19 +10,22 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
 </head>
 <body>
+    <aside class="sidebar">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
+            <a href="{{ url_for('migration_page') }}" class="nav-link active">Migration</a>
+            <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
+            <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
+            <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
+            <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
+            <button id="logoutBtn" class="btn-logout">Log Out</button>
+        </nav>
+    </aside>
     <div class="app-container">
         <header class="app-header">
-            <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
+            <button class="nav-toggle" id="navToggle">&#9776;</button>
             <h1>PlexyTrack</h1>
-            <nav class="app-nav">
-                <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
-                <a href="{{ url_for('migration_page') }}" class="nav-link active">Migration</a>
-                <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
-                <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
-                <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
-                <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
-                <button id="logoutBtn" class="btn-logout">Log Out</button>
-            </nav>
         </header>
 
         <main class="content-area">
