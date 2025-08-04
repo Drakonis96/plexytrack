@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PlexyTrack - Service Sync</title>
+    <title>PlexyTrack - Migration</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -16,7 +16,7 @@
             <h1>PlexyTrack</h1>
             <nav class="app-nav">
                 <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
-                <a href="{{ url_for('service_sync_page') }}" class="nav-link active">Service Sync</a>
+                <a href="{{ url_for('migration_page') }}" class="nav-link active">Migration</a>
                 <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
                 <a href="{{ url_for('config_page') }}" class="nav-link">Config.</a>
                 <a href="{{ url_for('users_page') }}" class="nav-link">Users</a>
