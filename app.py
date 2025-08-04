@@ -2701,15 +2701,17 @@ def migration_page():
                     "User-Agent": USER_AGENT,
                     "simkl-api-key": simkl_client_id,
                 }
-                try:
-                    from migration_utils import trakt_to_simkl
 
-                    trakt_to_simkl(trakt_headers, simkl_headers)
-                    message = "Trakt history synced to Simkl"
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Service sync failed: %s", exc)
-                    message = "Service sync failed"
-                    mtype = "error"
+                from migration_utils import trakt_to_simkl
+
+                def run_trakt_to_simkl() -> None:
+                    try:
+                        trakt_to_simkl(trakt_headers, simkl_headers)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("Service sync failed: %s", exc)
+
+                Thread(target=run_trakt_to_simkl).start()
+                message = "Migration started"
 
         elif direction == "simkl_to_trakt":
             if not (trakt_token and trakt_client_id and simkl_token and simkl_client_id):
@@ -2729,15 +2731,17 @@ def migration_page():
                     "User-Agent": USER_AGENT,
                     "simkl-api-key": simkl_client_id,
                 }
-                try:
-                    from migration_utils import simkl_to_trakt
 
-                    simkl_to_trakt(simkl_headers, trakt_headers)
-                    message = "Simkl history synced to Trakt"
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Service sync failed: %s", exc)
-                    message = "Service sync failed"
-                    mtype = "error"
+                from migration_utils import simkl_to_trakt
+
+                def run_simkl_to_trakt() -> None:
+                    try:
+                        simkl_to_trakt(simkl_headers, trakt_headers)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("Service sync failed: %s", exc)
+
+                Thread(target=run_simkl_to_trakt).start()
+                message = "Migration started"
 
         else:
             message = "Invalid sync direction"
