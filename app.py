@@ -108,7 +108,7 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.3.5"
+APP_VERSION = "v0.3.6"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -2665,8 +2665,9 @@ def restore_backup_route():
     return redirect(url_for("backup_page", message="Backup restored", mtype="success"))
 
 
+@app.route("/migration", methods=["GET", "POST"])
 @app.route("/service_sync", methods=["GET", "POST"])
-def service_sync_page():
+def migration_page():
     """Synchronize history between Trakt and Simkl."""
     load_trakt_tokens()
     load_simkl_tokens()
@@ -2742,7 +2743,7 @@ def service_sync_page():
             message = "Invalid sync direction"
             mtype = "error"
 
-    return render_template("service_sync.html", message=message, mtype=mtype)
+    return render_template("migration.html", message=message, mtype=mtype)
 
 
 @app.route("/webhook", methods=["POST"])
