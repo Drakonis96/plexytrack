@@ -6,21 +6,43 @@ body {
     margin: 0;
     padding: 0;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
     min-height: 100vh;
     line-height: 1.6;
 }
 
 /* App Container */
 .app-container {
+    flex: 1;
     width: 100%;
-    max-width: 900px;
-    margin: 20px;
+    margin: 0;
     background-color: #ffffff;
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
     overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    width: 220px;
+    padding: 20px 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    min-height: 100vh;
+}
+
+.sidebar .logo {
+    height: 50px;
+    width: auto;
+    margin: 0 auto 20px auto;
+}
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 /* App Header */
@@ -57,12 +79,6 @@ body {
     cursor: pointer;
 }
 
-/* Navigation */
-.app-nav {
-    display: flex;
-    gap: 15px;
-}
-
 .nav-link {
     color: #ecf0f1;
     text-decoration: none;
@@ -91,44 +107,33 @@ body {
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
-    margin-left: 20px;
 }
 
 .btn-logout:hover {
     background: #c82333;
 }
 
-/* Responsive Navigation (Mobile) */
+/* Responsive Sidebar (Mobile) */
 @media (max-width: 768px) {
-    .nav-toggle {
-        display: block;
-    }
-
-    .app-nav {
-        display: none;
+    body {
         flex-direction: column;
-        gap: 0;
-        position: absolute;
-        top: 100%;
-        left: 0;
-        width: 100%;
-        background-color: #2c3e50;
-        padding: 10px 0;
-        z-index: 1000;
     }
 
-    .app-nav.open {
+    .sidebar {
+        width: 100%;
+        display: none;
+    }
+
+    .sidebar.open {
         display: flex;
     }
 
-    .app-nav .nav-link,
-    .app-nav .btn-logout {
-        margin: 0;
-        padding: 10px 20px;
+    .app-container {
+        width: 100%;
     }
 
-    .app-nav .btn-logout {
-        margin-left: 0;
+    .nav-toggle {
+        display: block;
     }
 }
 
@@ -512,18 +517,6 @@ form button[type="submit"],
         position: absolute;
         top: 20px;
         right: 20px;
-    }
-
-    .app-nav {
-        display: none;
-        flex-direction: column;
-        gap: 10px;
-        margin-top: 15px;
-        width: 100%;
-    }
-
-    .app-nav.open {
-        display: flex;
     }
 
     .content-area {

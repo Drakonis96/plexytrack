@@ -17,10 +17,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     const navToggle = document.getElementById('navToggle');
-    const appNav = document.querySelector('.app-nav');
-    if (navToggle && appNav) {
+    const sidebar = document.querySelector('.sidebar');
+    if (navToggle && sidebar) {
         navToggle.addEventListener('click', function() {
-            appNav.classList.toggle('open');
+            sidebar.classList.toggle('open');
         });
     }
 });
