@@ -64,12 +64,9 @@ from plex_utils import (
     get_managed_user_plex_history,
     load_last_plex_sync,
     save_last_plex_sync,
+    load_state,
 )
 from trakt_utils import (
-    load_trakt_tokens,
-    save_trakt_tokens,
-    exchange_code_for_tokens,
-    refresh_trakt_token,
     trakt_request,
     get_trakt_history,
     update_trakt,
@@ -85,9 +82,6 @@ from trakt_utils import (
     restore_backup,
 )
 from simkl_utils import (
-    load_simkl_tokens,
-    save_simkl_token,
-    exchange_code_for_simkl_tokens,
     simkl_request,
     get_simkl_history,
     update_simkl,
@@ -142,7 +136,12 @@ SYNC_PROVIDER = "none"  # trakt | simkl | none
 # Directory used to store tokens and settings
 DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
 os.makedirs(DATA_DIR, exist_ok=True)
+CONFIG_DIR = os.path.join(DATA_DIR, "config")
+STATE_DIR = os.path.join(DATA_DIR, "state")
+AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
+STATE_FILE = os.path.join(STATE_DIR, "state.json")
 PROVIDER_FILE = os.path.join(DATA_DIR, "provider.json")
+SAFE_MODE = False
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
 plex_account = None  # will hold MyPlexAccount instance
@@ -172,11 +171,21 @@ session_plex_credentials = {
 stop_event = Event()
 
 
+def verify_volume(path: str, name: str) -> None:
+    """Ensure ``path`` exists and is a mounted volume."""
+    if not os.path.isdir(path):
+        raise SystemExit(
+            f"Required {name} directory '{path}' is missing. Bind mount a volume."
+        )
+    if not os.path.ismount(path):
+        raise SystemExit(
+            f"{name} directory '{path}' must be a mounted volume."
+        )
+
+
 # --------------------------------------------------------------------------- #
-# TRAKT / SIMKL OAUTH CONSTANTS
+# AUTH / SETTINGS
 # --------------------------------------------------------------------------- #
-TOKEN_FILE = os.path.join(DATA_DIR, "trakt_tokens.json")
-SIMKL_TOKEN_FILE = os.path.join(DATA_DIR, "simkl_tokens.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 
@@ -520,31 +529,50 @@ def normalize_year(value: Union[str, int, None]) -> Optional[int]:
 # --------------------------------------------------------------------------- #
 # TRAKT TOKENS
 # --------------------------------------------------------------------------- #
-def load_trakt_tokens() -> None:
-    if os.environ.get("TRAKT_ACCESS_TOKEN") and os.environ.get("TRAKT_REFRESH_TOKEN"):
-        return
-    if os.path.exists(TOKEN_FILE):
+def load_auth() -> dict:
+    """Load authentication tokens from :data:`AUTH_FILE`."""
+    if os.path.exists(AUTH_FILE):
         try:
-            with open(TOKEN_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            os.environ["TRAKT_ACCESS_TOKEN"] = data.get("access_token", "")
-            os.environ["TRAKT_REFRESH_TOKEN"] = data.get("refresh_token", "")
-            logger.info("Loaded Trakt tokens from %s", TOKEN_FILE)
-        except Exception as exc:
-            logger.error("Failed to load Trakt tokens: %s", exc)
+            with open(AUTH_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load auth file: %s", exc)
+    return {}
 
 
-def save_trakt_tokens(access_token: str, refresh_token: Optional[str]) -> None:
+def save_auth(data: dict) -> None:
+    """Persist authentication tokens to :data:`AUTH_FILE`."""
     try:
-        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                {"access_token": access_token, "refresh_token": refresh_token},
-                f,
-                indent=2,
-            )
-        logger.info("Saved Trakt tokens to %s", TOKEN_FILE)
-    except Exception as exc:
-        logger.error("Failed to save Trakt tokens: %s", exc)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(AUTH_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save auth file: %s", exc)
+
+
+def load_trakt_tokens() -> bool:
+    auth = load_auth()
+    tokens = auth.get("trakt")
+    if tokens:
+        os.environ["TRAKT_ACCESS_TOKEN"] = tokens.get("access_token", "")
+        os.environ["TRAKT_REFRESH_TOKEN"] = tokens.get("refresh_token", "")
+        os.environ["TRAKT_EXPIRES_AT"] = str(tokens.get("expires_at", ""))
+        logger.info("Loaded Trakt tokens from %s", AUTH_FILE)
+        return True
+    return False
+
+
+def save_trakt_tokens(
+    access_token: str, refresh_token: Optional[str], expires_in: Optional[int] = None
+) -> None:
+    auth = load_auth()
+    auth["trakt"] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": int(time.time()) + int(expires_in) if expires_in else None,
+    }
+    save_auth(auth)
+    logger.info("Saved Trakt tokens to %s", AUTH_FILE)
 
 
 def exchange_code_for_tokens(code: str) -> Optional[dict]:
@@ -576,7 +604,11 @@ def exchange_code_for_tokens(code: str) -> Optional[dict]:
     data = resp.json()
     os.environ["TRAKT_ACCESS_TOKEN"] = data["access_token"]
     os.environ["TRAKT_REFRESH_TOKEN"] = data.get("refresh_token")
-    save_trakt_tokens(data["access_token"], data.get("refresh_token"))
+    save_trakt_tokens(
+        data["access_token"],
+        data.get("refresh_token"),
+        data.get("expires_in"),
+    )
     logger.info("Trakt tokens obtained via authorization code")
     return data
 
@@ -611,31 +643,39 @@ def refresh_trakt_token() -> Optional[str]:
     data = resp.json()
     os.environ["TRAKT_ACCESS_TOKEN"] = data["access_token"]
     os.environ["TRAKT_REFRESH_TOKEN"] = data.get("refresh_token", refresh_token)
-    save_trakt_tokens(data["access_token"], os.environ["TRAKT_REFRESH_TOKEN"])
+    save_trakt_tokens(
+        data["access_token"],
+        os.environ["TRAKT_REFRESH_TOKEN"],
+        data.get("expires_in"),
+    )
     logger.info("Trakt access token refreshed")
     return data["access_token"]
 
 
-def load_simkl_tokens() -> None:
-    if os.environ.get("SIMKL_ACCESS_TOKEN"):
-        return
-    if os.path.exists(SIMKL_TOKEN_FILE):
-        try:
-            with open(SIMKL_TOKEN_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            os.environ["SIMKL_ACCESS_TOKEN"] = data.get("access_token", "")
-            logger.info("Loaded Simkl token from %s", SIMKL_TOKEN_FILE)
-        except Exception as exc:
-            logger.error("Failed to load Simkl token: %s", exc)
+def load_simkl_tokens() -> bool:
+    auth = load_auth()
+    tokens = auth.get("simkl")
+    if tokens:
+        os.environ["SIMKL_ACCESS_TOKEN"] = tokens.get("access_token", "")
+        os.environ["SIMKL_EXPIRES_AT"] = str(tokens.get("expires_at", ""))
+        logger.info("Loaded Simkl token from %s", AUTH_FILE)
+        return True
+    return False
 
 
-def save_simkl_token(access_token: str) -> None:
-    try:
-        with open(SIMKL_TOKEN_FILE, "w", encoding="utf-8") as f:
-            json.dump({"access_token": access_token}, f, indent=2)
-        logger.info("Saved Simkl token to %s", SIMKL_TOKEN_FILE)
-    except Exception as exc:
-        logger.error("Failed to save Simkl token: %s", exc)
+def save_simkl_token(
+    access_token: str,
+    refresh_token: Optional[str] = None,
+    expires_in: Optional[int] = None,
+) -> None:
+    auth = load_auth()
+    auth["simkl"] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": int(time.time()) + int(expires_in) if expires_in else None,
+    }
+    save_auth(auth)
+    logger.info("Saved Simkl token to %s", AUTH_FILE)
 
 
 def exchange_code_for_simkl_tokens(code: str) -> Optional[dict]:
@@ -666,7 +706,11 @@ def exchange_code_for_simkl_tokens(code: str) -> Optional[dict]:
 
     data = resp.json()
     os.environ["SIMKL_ACCESS_TOKEN"] = data["access_token"]
-    save_simkl_token(data["access_token"])
+    save_simkl_token(
+        data["access_token"],
+        data.get("refresh_token"),
+        data.get("expires_in"),
+    )
     logger.info("Simkl token obtained via authorization code")
     return data
 
@@ -1829,8 +1873,8 @@ def sync():
     # Validate bidirectional sync configuration
     validate_bidirectional_sync_config()
     
-    trakt_enabled = os.path.exists(TOKEN_FILE)
-    simkl_enabled = os.path.exists(SIMKL_TOKEN_FILE)
+    trakt_enabled = load_trakt_tokens()
+    simkl_enabled = load_simkl_tokens()
 
     headers = {}
     if SYNC_PROVIDER == "trakt" and trakt_enabled:
@@ -1845,7 +1889,6 @@ def sync():
             "trakt-api-key": os.environ["TRAKT_CLIENT_ID"],
         }
     elif SYNC_PROVIDER == "simkl" and simkl_enabled:
-        load_simkl_tokens()
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {os.environ.get('SIMKL_ACCESS_TOKEN')}",
@@ -2189,7 +2232,8 @@ def sync():
     elif SYNC_PROVIDER == "simkl":
         logger.warning("Plex Collections sync to Simkl is not yet supported.")
 
-    save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
+    if SYNC_WATCHED:
+        save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
     logger.info("Sync finished.")
 
 
@@ -2629,24 +2673,22 @@ def clear_service(service: str):
     if service == "trakt":
         os.environ.pop("TRAKT_ACCESS_TOKEN", None)
         os.environ.pop("TRAKT_REFRESH_TOKEN", None)
-        if os.path.exists(TOKEN_FILE):
-            try:
-                os.remove(TOKEN_FILE)
-                logger.info("Removed Trakt token file")
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to remove Trakt token file: %s", exc)
+        auth = load_auth()
+        auth.pop("trakt", None)
+        save_auth(auth)
+        logger.info("Removed Trakt tokens")
         if SYNC_PROVIDER == "trakt":
             save_provider("none")
     elif service == "simkl":
         os.environ.pop("SIMKL_ACCESS_TOKEN", None)
-        if os.path.exists(SIMKL_TOKEN_FILE):
-            try:
-                os.remove(SIMKL_TOKEN_FILE)
-                logger.info("Removed Simkl token file")
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to remove Simkl token file: %s", exc)
+        auth = load_auth()
+        auth.pop("simkl", None)
+        save_auth(auth)
+        logger.info("Removed Simkl token")
         if SYNC_PROVIDER == "simkl":
             save_provider("none")
+    else:
+        return jsonify({"success": False, "error": "Unknown service"})
     return redirect(url_for("config_page"))
 
 
@@ -3484,6 +3526,11 @@ def get_selected_user_history(mindate: Optional[str] = None):
 
     if mindate is None:
         mindate = load_last_plex_sync()
+        if mindate is None and SAFE_MODE:
+            logger.warning(
+                "SAFE-MODE active: skipping full Plex history sync"
+            )
+            return {}, {}
 
     if selected_user["is_owner"]:
         logger.debug(
@@ -3837,10 +3884,18 @@ def clear_session_credentials():
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     logger.info("Starting PlexyTrackt application")
+    verify_volume(CONFIG_DIR, "config")
+    verify_volume(STATE_DIR, "state")
+    state_data = load_state()
     load_trakt_tokens()
     load_simkl_tokens()
     load_provider()
     load_settings()
+    if state_data.get("lastSync") is None and not SYNC_WATCHED:
+        SAFE_MODE = True
+        logger.warning(
+            "No last sync timestamp and history sync disabled; entering SAFE-MODE"
+        )
     # Removed automatic scheduler start - only manual start from sync tab
     # start_scheduler()
     # Disable Flask's auto-reloader to avoid duplicate logs

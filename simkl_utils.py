@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import requests
@@ -13,29 +14,53 @@ APP_NAME = "PlexyTrack"
 APP_VERSION = "v0.3.6"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
-SIMKL_TOKEN_FILE = "simkl_tokens.json"
+DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
+AUTH_FILE = os.path.join(DATA_DIR, "config", "auth.json")
 
 
-def load_simkl_tokens() -> None:
-    if os.environ.get("SIMKL_ACCESS_TOKEN"):
-        return
-    if os.path.exists(SIMKL_TOKEN_FILE):
+def load_auth() -> dict:
+    if os.path.exists(AUTH_FILE):
         try:
-            with open(SIMKL_TOKEN_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            os.environ["SIMKL_ACCESS_TOKEN"] = data.get("access_token", "")
-            logger.info("Loaded Simkl token from %s", SIMKL_TOKEN_FILE)
-        except Exception as exc:
-            logger.error("Failed to load Simkl token: %s", exc)
+            with open(AUTH_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load auth file: %s", exc)
+    return {}
 
 
-def save_simkl_token(access_token: str) -> None:
+def save_auth(data: dict) -> None:
     try:
-        with open(SIMKL_TOKEN_FILE, "w", encoding="utf-8") as f:
-            json.dump({"access_token": access_token}, f, indent=2)
-        logger.info("Saved Simkl token to %s", SIMKL_TOKEN_FILE)
-    except Exception as exc:
-        logger.error("Failed to save Simkl token: %s", exc)
+        os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
+        with open(AUTH_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save auth file: %s", exc)
+
+
+def load_simkl_tokens() -> bool:
+    auth = load_auth()
+    tokens = auth.get("simkl")
+    if tokens:
+        os.environ["SIMKL_ACCESS_TOKEN"] = tokens.get("access_token", "")
+        os.environ["SIMKL_EXPIRES_AT"] = str(tokens.get("expires_at", ""))
+        logger.info("Loaded Simkl token from %s", AUTH_FILE)
+        return True
+    return False
+
+
+def save_simkl_token(
+    access_token: str,
+    refresh_token: Optional[str] = None,
+    expires_in: Optional[int] = None,
+) -> None:
+    auth = load_auth()
+    auth["simkl"] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": int(time.time()) + int(expires_in) if expires_in else None,
+    }
+    save_auth(auth)
+    logger.info("Saved Simkl token to %s", AUTH_FILE)
 
 
 
@@ -63,7 +88,11 @@ def exchange_code_for_simkl_tokens(code: str, redirect_uri: str) -> Optional[dic
 
     data = resp.json()
     os.environ["SIMKL_ACCESS_TOKEN"] = data["access_token"]
-    save_simkl_token(data["access_token"])
+    save_simkl_token(
+        data["access_token"],
+        data.get("refresh_token"),
+        data.get("expires_in"),
+    )
     logger.info("Simkl token obtained via authorization code")
     return data
 

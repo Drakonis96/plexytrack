@@ -7,7 +7,17 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import requests
 
-from utils import guid_to_ids, normalize_year, to_iso_z, valid_guid, best_guid, imdb_guid, get_show_from_library, ensure_collection, find_item_by_guid
+from utils import (
+    guid_to_ids,
+    normalize_year,
+    to_iso_z,
+    valid_guid,
+    best_guid,
+    imdb_guid,
+    get_show_from_library,
+    ensure_collection,
+    find_item_by_guid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +25,8 @@ APP_NAME = "PlexyTrack"
 APP_VERSION = "v0.3.6"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
-TOKEN_FILE = "trakt_tokens.json"
+DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
+AUTH_FILE = os.path.join(DATA_DIR, "config", "auth.json")
 WATCHLIST_STATE_FILE = "watchlist_state.json"
 
 
@@ -39,27 +50,46 @@ def save_watchlist_state(state: dict) -> None:
         logger.debug("Failed to save watchlist state: %s", exc)
 
 
-def load_trakt_tokens() -> None:
-    if os.environ.get("TRAKT_ACCESS_TOKEN") and os.environ.get("TRAKT_REFRESH_TOKEN"):
-        return
-    if os.path.exists(TOKEN_FILE):
+def load_auth() -> dict:
+    if os.path.exists(AUTH_FILE):
         try:
-            with open(TOKEN_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            os.environ["TRAKT_ACCESS_TOKEN"] = data.get("access_token", "")
-            os.environ["TRAKT_REFRESH_TOKEN"] = data.get("refresh_token", "")
-            logger.info("Loaded Trakt tokens from %s", TOKEN_FILE)
-        except Exception as exc:
-            logger.error("Failed to load Trakt tokens: %s", exc)
+            with open(AUTH_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load auth file: %s", exc)
+    return {}
 
 
-def save_trakt_tokens(access_token: str, refresh_token: Optional[str]) -> None:
+def save_auth(data: dict) -> None:
     try:
-        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-            json.dump({"access_token": access_token, "refresh_token": refresh_token}, f, indent=2)
-        logger.info("Saved Trakt tokens to %s", TOKEN_FILE)
-    except Exception as exc:
-        logger.error("Failed to save Trakt tokens: %s", exc)
+        os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
+        with open(AUTH_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save auth file: %s", exc)
+
+
+def load_trakt_tokens() -> bool:
+    auth = load_auth()
+    tokens = auth.get("trakt")
+    if tokens:
+        os.environ["TRAKT_ACCESS_TOKEN"] = tokens.get("access_token", "")
+        os.environ["TRAKT_REFRESH_TOKEN"] = tokens.get("refresh_token", "")
+        os.environ["TRAKT_EXPIRES_AT"] = str(tokens.get("expires_at", ""))
+        logger.info("Loaded Trakt tokens from %s", AUTH_FILE)
+        return True
+    return False
+
+
+def save_trakt_tokens(access_token: str, refresh_token: Optional[str], expires_in: Optional[int] = None) -> None:
+    auth = load_auth()
+    auth["trakt"] = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": int(time.time()) + int(expires_in) if expires_in else None,
+    }
+    save_auth(auth)
+    logger.info("Saved Trakt tokens to %s", AUTH_FILE)
 
 
 
@@ -104,7 +134,11 @@ def exchange_code_for_tokens(code: str, redirect_uri: Optional[str] = None) -> O
     data = resp.json()
     os.environ["TRAKT_ACCESS_TOKEN"] = data["access_token"]
     os.environ["TRAKT_REFRESH_TOKEN"] = data.get("refresh_token")
-    save_trakt_tokens(data["access_token"], data.get("refresh_token"))
+    save_trakt_tokens(
+        data["access_token"],
+        data.get("refresh_token"),
+        data.get("expires_in"),
+    )
     logger.info("Trakt tokens obtained via authorization code")
     return data
 
@@ -134,7 +168,11 @@ def refresh_trakt_token(redirect_uri: str) -> Optional[str]:
     data = resp.json()
     os.environ["TRAKT_ACCESS_TOKEN"] = data["access_token"]
     os.environ["TRAKT_REFRESH_TOKEN"] = data.get("refresh_token", refresh_token)
-    save_trakt_tokens(data["access_token"], os.environ["TRAKT_REFRESH_TOKEN"])
+    save_trakt_tokens(
+        data["access_token"],
+        os.environ["TRAKT_REFRESH_TOKEN"],
+        data.get("expires_in"),
+    )
     logger.info("Trakt access token refreshed")
     return data["access_token"]
 

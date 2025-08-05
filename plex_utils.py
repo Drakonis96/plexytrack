@@ -26,29 +26,56 @@ _show_guid_cache: Dict[str, Optional[str]] = {}
 # Global cache for ratings from Plex library sections
 _ratings_cache: Dict[str, Dict[str, float]] = {}
 
-# File to persist the timestamp of the last successful Plex sync
-PLEX_SYNC_STATE_FILE = "plex_sync_state.json"
+# Paths for persistent state storage
+DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
+STATE_DIR = os.path.join(DATA_DIR, "state")
+STATE_FILE = os.path.join(STATE_DIR, "state.json")
+STATE_SCHEMA_VERSION = 2
+
+
+def _load_state() -> Dict[str, dict]:
+    """Load persistent state from :data:`STATE_FILE`."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("schema") == STATE_SCHEMA_VERSION:
+                return data
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to load state file: %s", exc)
+    return {"schema": STATE_SCHEMA_VERSION, "lastSync": None, "guid_cache": {}}
+
+
+def _save_state(data: Dict[str, dict]) -> None:
+    """Persist ``data`` to :data:`STATE_FILE`."""
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to save state file: %s", exc)
+
+
+def load_state() -> Dict[str, dict]:
+    """Public helper to load the entire state."""
+    return _load_state()
+
+
+def save_state(state: Dict[str, dict]) -> None:
+    """Public helper to persist the entire state."""
+    _save_state(state)
 
 
 def load_last_plex_sync() -> Optional[str]:
     """Return the timestamp of the last successful Plex sync if available."""
-    if os.path.exists(PLEX_SYNC_STATE_FILE):
-        try:
-            with open(PLEX_SYNC_STATE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data.get("last_sync")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("Failed to load Plex sync state: %s", exc)
-    return None
+    return _load_state().get("lastSync")
 
 
 def save_last_plex_sync(timestamp: str) -> None:
     """Persist ``timestamp`` as the last successful Plex sync time."""
-    try:
-        with open(PLEX_SYNC_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"last_sync": timestamp}, f, indent=2)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Failed to save Plex sync state: %s", exc)
+    state = _load_state()
+    state["lastSync"] = timestamp
+    _save_state(state)
 
 def reset_movie_guid_cache():
     """Reset the global movie GUID cache"""
