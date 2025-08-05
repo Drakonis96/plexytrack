@@ -2440,7 +2440,6 @@ def index():
             SYNC_COLLECTION = False
             SYNC_LIKED_LISTS = False
             SYNC_WATCHLISTS = False
-            LIVE_SYNC = False
 
         # Persist final settings to disk after applying restrictions
         save_settings()
@@ -2481,7 +2480,6 @@ def index():
         display_collection = False
         display_liked_lists = False
         display_watchlists = False
-        display_live_sync = False
 
     if selected_user and not selected_user.get("is_owner", False):
         # Disable restricted options in the UI for managed users
@@ -2554,7 +2552,6 @@ def sync_once():
         SYNC_COLLECTION = False
         SYNC_LIKED_LISTS = False
         SYNC_WATCHLISTS = False
-        LIVE_SYNC = False
 
     save_settings()
 
@@ -2870,6 +2867,31 @@ def plex_webhook():
     if LIVE_SYNC:
         # Trigger a one-off sync immediately
         stop_event.clear()
+
+        if SYNC_PROVIDER == "simkl":
+            client_id = os.environ.get("SIMKL_CLIENT_ID")
+            token = os.environ.get("SIMKL_ACCESS_TOKEN")
+            if client_id and token:
+                url = (
+                    f"https://api.simkl.com/sync/plex/webhook?client_id={client_id}&token={token}"
+                )
+                try:
+                    requests.post(
+                        url,
+                        data=request.data,
+                        headers={
+                            "Content-Type": request.content_type
+                            or "application/json"
+                        },
+                        timeout=10,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to forward webhook to Simkl: %s", exc)
+            else:
+                logger.warning(
+                    "Missing Simkl client ID or access token; cannot forward webhook."
+                )
+
         only_watchlist = SYNC_WATCHLISTS and not any(
             [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
         )
