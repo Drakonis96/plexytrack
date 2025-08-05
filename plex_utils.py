@@ -229,6 +229,12 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
 
         for entry in history_items:
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+            if not watched_at:
+                # Skip entries that don't have a watched timestamp. These can
+                # include watchlist items or other actions that aren't actual
+                # play events and would otherwise be incorrectly synced as
+                # watched.
+                continue
             if mindate and not safe_timestamp_compare(watched_at, mindate):
                 continue
 
@@ -491,6 +497,11 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
             
             for entry in history_items:
                 watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+                if not watched_at:
+                    # History entries without a viewedAt timestamp correspond
+                    # to actions such as watchlist additions. Skip them to
+                    # avoid treating unwatched items as watched.
+                    continue
                 if mindate and not safe_timestamp_compare(watched_at, mindate):
                     continue
                 
@@ -806,6 +817,10 @@ def get_server_based_history(plex, mindate: Optional[str] = None) -> Tuple[
     try:
         for entry in plex.history(mindate=mindate):
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
+            if not watched_at:
+                # Entries with no watched timestamp are not actual play
+                # events (e.g. watchlist additions) and should be ignored.
+                continue
             if mindate and not safe_timestamp_compare(watched_at, mindate):
                 continue
 
