@@ -16,5 +16,5 @@ services:
       SIMKL_CLIENT_ID: ${SIMKL_CLIENT_ID}
       SIMKL_CLIENT_SECRET: ${SIMKL_CLIENT_SECRET}
     volumes:
-      - ./config:/config         # credenciales + auth.json  (bind-mount)
+      - ./config:/config
       - ./state:/state
