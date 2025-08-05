@@ -13,9 +13,8 @@ logger = logging.getLogger(__name__)
 APP_NAME = "PlexyTrack"
 APP_VERSION = "v0.3.6"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
-
-DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
-AUTH_FILE = os.path.join(DATA_DIR, "config", "auth.json")
+CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
+AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
 
 
 def load_auth() -> dict:

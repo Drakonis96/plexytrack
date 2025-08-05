@@ -3,16 +3,18 @@ import importlib
 
 
 def setup_modules(tmp_path, monkeypatch):
-    monkeypatch.setenv("PLEXYTRACK_DATA_DIR", str(tmp_path))
+    config_dir = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("PLEXYTRACK_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("PLEXYTRACK_STATE_DIR", str(state_dir))
     plex_utils = importlib.reload(importlib.import_module("plex_utils"))
     app = importlib.reload(importlib.import_module("app"))
-    return plex_utils, app
+    return plex_utils, app, config_dir, state_dir
 
 
 def test_migrates_v1_state_no_safe_mode(tmp_path, monkeypatch):
-    plex_utils, _ = setup_modules(tmp_path, monkeypatch)
+    plex_utils, _, config_dir, _ = setup_modules(tmp_path, monkeypatch)
     legacy = {"lastSync": "2024-01-01T00:00:00Z", "guid_cache": {"x": "y"}}
-    config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "state.json").write_text(json.dumps(legacy))
 
@@ -30,12 +32,11 @@ def test_migrates_v1_state_no_safe_mode(tmp_path, monkeypatch):
 
 
 def test_token_refresh_with_migrated_state(tmp_path, monkeypatch):
-    plex_utils, app = setup_modules(tmp_path, monkeypatch)
+    plex_utils, app, config_dir, _ = setup_modules(tmp_path, monkeypatch)
     monkeypatch.setenv("TRAKT_CLIENT_ID", "cid")
     monkeypatch.setenv("TRAKT_CLIENT_SECRET", "secret")
     monkeypatch.setenv("TRAKT_REFRESH_TOKEN", "old")
 
-    config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "state.json").write_text(json.dumps({"lastSync": "2024-01-01T00:00:00Z"}))
 

@@ -134,14 +134,12 @@ SYNC_LIKED_LISTS = False
 SYNC_WATCHLISTS = False
 LIVE_SYNC = False
 SYNC_PROVIDER = "none"  # trakt | simkl | none
-# Directory used to store tokens and settings
-DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
-os.makedirs(DATA_DIR, exist_ok=True)
-CONFIG_DIR = os.path.join(DATA_DIR, "config")
-STATE_DIR = os.path.join(DATA_DIR, "state")
+
+CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
+STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
-PROVIDER_FILE = os.path.join(DATA_DIR, "provider.json")
+PROVIDER_FILE = os.path.join(CONFIG_DIR, "provider.json")
 SAFE_MODE = False
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
@@ -172,6 +170,13 @@ session_plex_credentials = {
 stop_event = Event()
 
 
+def ensure_directory(path: str) -> None:
+    """Create ``path`` with 0700 permissions if missing."""
+    if not os.path.isdir(path):
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        logger.info("Created missing directory %s; continuing start-up.", path)
+
+
 def verify_volume(path: str, name: str) -> None:
     """Ensure ``path`` exists and is a mounted volume."""
     if not os.path.isdir(path):
@@ -187,7 +192,7 @@ def verify_volume(path: str, name: str) -> None:
 # --------------------------------------------------------------------------- #
 # AUTH / SETTINGS
 # --------------------------------------------------------------------------- #
-SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -3491,7 +3496,7 @@ def stop_scheduler():
 # --------------------------------------------------------------------------- #
 # USER SELECTION FOR SYNC
 # --------------------------------------------------------------------------- #
-SELECTED_USER_FILE = os.path.join(DATA_DIR, "selected_user.json")
+SELECTED_USER_FILE = os.path.join(CONFIG_DIR, "selected_user.json")
 
 def load_selected_user():
     """Load selected user information from file."""
@@ -3885,6 +3890,8 @@ def clear_session_credentials():
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     logger.info("Starting PlexyTrackt application")
+    ensure_directory(CONFIG_DIR)
+    ensure_directory(STATE_DIR)
     verify_volume(CONFIG_DIR, "config")
     migrate_legacy_state()
     verify_volume(STATE_DIR, "state")

@@ -27,10 +27,9 @@ _show_guid_cache: Dict[str, Optional[str]] = {}
 _ratings_cache: Dict[str, Dict[str, float]] = {}
 
 # Paths for persistent state storage
-DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
-STATE_DIR = os.path.join(DATA_DIR, "state")
+CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
+STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
-CONFIG_DIR = os.path.join(DATA_DIR, "config")
 LEGACY_STATE_FILE = os.path.join(CONFIG_DIR, "state.json")
 STATE_SCHEMA_VERSION = 2
 
