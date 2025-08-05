@@ -2,11 +2,19 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
 
 import requests
 
-from utils import guid_to_ids, normalize_year, simkl_episode_key, to_iso_z
+from utils import (
+    guid_to_ids,
+    normalize_year,
+    simkl_episode_key,
+    to_iso_z,
+    find_item_by_guid,
+    best_guid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -428,5 +436,141 @@ def update_simkl_for_managed_user(headers: dict, movies: list, episodes: list) -
         if scrobble_item_to_simkl(headers, item_data):
             synced_episodes += 1
     
-    logger.info("Successfully synced %d movies and %d episodes to Simkl", 
+    logger.info("Successfully synced %d movies and %d episodes to Simkl",
                 synced_movies, synced_episodes)
+
+
+def sync_simkl_ratings(plex, headers):
+    """Sync movie and show ratings from Plex to Simkl."""
+    from plex_utils import get_cached_ratings
+
+    movies: List[dict] = []
+    shows: List[dict] = []
+
+    rated_now = to_iso_z(datetime.utcnow())
+
+    cached_ratings = get_cached_ratings(plex)
+    logger.info("Using cached ratings for %d sections", len(cached_ratings))
+
+    for section in plex.library.sections():
+        section_key = str(section.key)
+        section_ratings = cached_ratings.get(section_key, {})
+
+        if not section_ratings:
+            logger.debug("No cached ratings found for section: %s", section.title)
+            continue
+
+        logger.debug(
+            "Processing %d rated items in section: %s", len(section_ratings), section.title
+        )
+
+        if section.type == "movie":
+            for rating_key, rating in section_ratings.items():
+                try:
+                    item = plex.fetchItem(int(rating_key))
+                    guid = best_guid(item)
+                    obj: Dict[str, Union[str, int, dict]] = {
+                        "title": item.title,
+                        "rating": int(round(float(rating))),
+                        "rated_at": rated_now,
+                    }
+                    if getattr(item, "year", None):
+                        obj["year"] = normalize_year(item.year)
+                    if guid:
+                        obj["ids"] = guid_to_ids(guid)
+                    movies.append(obj)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "Failed to fetch movie with rating key %s: %s", rating_key, exc
+                    )
+                    continue
+
+        elif section.type == "show":
+            for rating_key, rating in section_ratings.items():
+                try:
+                    item = plex.fetchItem(int(rating_key))
+                    if item.type != "show":
+                        continue  # Simkl does not support rating seasons or episodes
+                    guid = best_guid(item)
+                    obj: Dict[str, Union[str, int, dict]] = {
+                        "title": item.title,
+                        "rating": int(round(float(rating))),
+                        "rated_at": rated_now,
+                    }
+                    if getattr(item, "year", None):
+                        obj["year"] = normalize_year(item.year)
+                    if guid:
+                        obj["ids"] = guid_to_ids(guid)
+                    shows.append(obj)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "Failed to fetch show with rating key %s: %s", rating_key, exc
+                    )
+                    continue
+
+    payload: Dict[str, list] = {}
+    if movies:
+        payload["movies"] = movies
+    if shows:
+        payload["shows"] = shows
+
+    if payload:
+        simkl_request("POST", "/sync/ratings", headers, json=payload)
+        logger.info(
+            "Synced %d movie and %d show ratings to Simkl",
+            len(movies),
+            len(shows),
+        )
+    else:
+        logger.info("No Plex ratings to sync")
+
+
+def fetch_simkl_ratings(headers) -> List[dict]:
+    """Return all ratings from Simkl."""
+    try:
+        resp = simkl_request("GET", "/sync/ratings", headers)
+        data = resp.json() if resp.content else {}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch ratings from Simkl: %s", exc)
+        return []
+
+    items: List[dict] = []
+    for m in data.get("movies", []):
+        items.append({"type": "movie", "ids": m.get("ids", {}), "rating": m.get("rating")})
+    for s in data.get("shows", []):
+        items.append({"type": "show", "ids": s.get("ids", {}), "rating": s.get("rating")})
+    return items
+
+
+def apply_simkl_ratings(plex, headers):
+    """Apply ratings from Simkl to matching Plex items."""
+    ratings = fetch_simkl_ratings(headers)
+    count = 0
+    for item in ratings:
+        ids = item.get("ids", {})
+        rating = item.get("rating")
+        if rating is None:
+            continue
+
+        guid = None
+        if ids.get("imdb"):
+            guid = f"imdb://{ids['imdb']}"
+        elif ids.get("tmdb"):
+            guid = f"tmdb://{ids['tmdb']}"
+        elif ids.get("tvdb"):
+            guid = f"tvdb://{ids['tvdb']}"
+        if not guid:
+            continue
+
+        plex_item = find_item_by_guid(plex, guid)
+        if not plex_item:
+            continue
+
+        try:
+            plex_item.rate(float(rating))
+            count += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to rate item %s: %s", guid, exc)
+
+    if count:
+        logger.info("Applied %d ratings from Simkl to Plex", count)

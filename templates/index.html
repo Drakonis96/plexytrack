@@ -131,7 +131,7 @@
                             </select>
                         </div>
                         <div class="checkbox-group">
-                            <input type="checkbox" id="ratings" name="ratings" {% if ratings %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
+                            <input type="checkbox" id="ratings" name="ratings" {% if ratings %}checked{% endif %}>
                             <label for="ratings">Ratings</label>
                             <select id="ratings_direction" name="ratings_direction" class="direction-select">
                                 <option value="both" {% if ratings_direction == 'both' %}selected{% endif %}>Bidirectional</option>

@@ -86,6 +86,8 @@ from simkl_utils import (
     simkl_request,
     get_simkl_history,
     update_simkl,
+    sync_simkl_ratings,
+    apply_simkl_ratings,
 )
 
 # --------------------------------------------------------------------------- #
@@ -2189,7 +2191,10 @@ def sync():
                 return
             sync_ratings(plex, headers)
         elif SYNC_PROVIDER == "simkl":
-            logger.warning("Ratings sync with Simkl is not yet supported.")
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+            sync_simkl_ratings(plex, headers)
 
     if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
         if SYNC_PROVIDER == "trakt" and selected_user.get("is_owner", False):
@@ -2197,8 +2202,11 @@ def sync():
                 logger.info("Sync cancelled")
                 return
             apply_trakt_ratings(plex, headers)
-        elif SYNC_PROVIDER == "simkl":
-            logger.warning("Ratings import from Simkl is not yet supported.")
+        elif SYNC_PROVIDER == "simkl" and selected_user.get("is_owner", False):
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+            apply_simkl_ratings(plex, headers)
 
     if SYNC_WATCHLISTS and SYNC_PROVIDER == "trakt":
         if stop_event.is_set():
@@ -2430,7 +2438,6 @@ def index():
 
         if SYNC_PROVIDER == "simkl":
             SYNC_COLLECTION = False
-            SYNC_RATINGS = False
             SYNC_LIKED_LISTS = False
             SYNC_WATCHLISTS = False
             LIVE_SYNC = False
@@ -2472,7 +2479,6 @@ def index():
 
     if SYNC_PROVIDER == "simkl":
         display_collection = False
-        display_ratings = False
         display_liked_lists = False
         display_watchlists = False
         display_live_sync = False
@@ -2546,7 +2552,6 @@ def sync_once():
 
     if SYNC_PROVIDER == "simkl":
         SYNC_COLLECTION = False
-        SYNC_RATINGS = False
         SYNC_LIKED_LISTS = False
         SYNC_WATCHLISTS = False
         LIVE_SYNC = False

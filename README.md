@@ -4,13 +4,13 @@
   <img src="static/logo2.png" alt="PlexyTrack Logo" width="200" />
 </p>
 
-This project synchronizes your Plex library with Trakt. Besides watched history it can optionally add items to your Trakt collection, sync ratings and watchlists, and now mirrors Trakt lists you like as Plex collections. Collections created in Plex will in turn appear as Trakt lists. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
+This project synchronizes your Plex library with Trakt or Simkl. Besides watched history it can optionally add items to your Trakt collection, sync ratings and watchlists, and now mirrors Trakt lists you like as Plex collections. Collections created in Plex will in turn appear as Trakt lists. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
 The recommended sync interval is **at least 60 minutes**. Shorter intervals generally do not provide any benefit, and you can even synchronize once every 24 hours to reduce the load on your server and the API.
 
 ## Features
 
 - Bidirectional sync of watched history between Plex and Trakt or Simkl
-- Optional synchronization of ratings, collections, liked lists and watchlists
+- Optional synchronization of ratings, collections, liked lists and watchlists (ratings supported for both Trakt and Simkl; Simkl accepts movies and shows only)
 - Live Sync mode to trigger updates immediately from Plex webhooks
 - Simple backup and restore of all your Trakt data from the web interface
 - Intuitive UI for configuration and user selection
