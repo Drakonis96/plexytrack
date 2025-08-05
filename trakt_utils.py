@@ -22,7 +22,7 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.3.6"
+APP_VERSION = "v0.4.0"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")

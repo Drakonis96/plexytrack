@@ -11,7 +11,7 @@ from utils import guid_to_ids, normalize_year, simkl_episode_key, to_iso_z
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.3.6"
+APP_VERSION = "v0.4.0"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
