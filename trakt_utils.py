@@ -37,7 +37,10 @@ def load_watchlist_state() -> dict:
                 return json.load(f)
         except Exception as exc:
             logger.debug("Failed to load watchlist state: %s", exc)
-    return {"plex": {"guids": [], "meta": {}}, "trakt": {"movies": [], "shows": [], "last_activity": None}}
+    return {
+        "plex": {"guids": [], "types": {}, "meta": {}},
+        "trakt": {"movies": [], "shows": [], "last_activity": None},
+    }
 
 
 def save_watchlist_state(state: dict) -> None:
@@ -808,6 +811,7 @@ def sync_watchlist(
     plex_state = state.get("plex", {})
     plex_meta = plex_state.get("meta", {})
     plex_guids = set(plex_state.get("guids", []))
+    plex_types = plex_state.get("types", {})
     plex_changed = True
     total_size = plex_meta.get("size")
     latest_added_at = plex_meta.get("updated_at")
@@ -830,12 +834,15 @@ def sync_watchlist(
             logger.error("Failed to fetch Plex watchlist: %s", exc)
             plex_watch = []
         plex_guids = set()
+        plex_types = {}
         for item in plex_watch:
             g = imdb_guid(item)
             if g:
                 plex_guids.add(g)
+                plex_types[g] = item.TYPE
         state["plex"] = {
             "guids": list(plex_guids),
+            "types": plex_types,
             "meta": {"size": total_size, "updated_at": latest_added_at},
         }
 
@@ -850,14 +857,19 @@ def sync_watchlist(
         movies_to_add: List[dict] = []
         shows_to_add: List[dict] = []
         for guid in only_in_plex:
-            item = find_item_by_guid(plex, guid)
-            if not item:
-                continue
+            item_type = plex_types.get(guid)
+            if item_type is None:
+                item = find_item_by_guid(plex, guid)
+                if not item:
+                    continue
+                item_type = getattr(item, "TYPE", None)
+                if item_type:
+                    plex_types[guid] = item_type
             data = guid_to_ids(guid)
-            if item.TYPE == "movie":
+            if item_type == "movie":
                 movies_to_add.append({"ids": data})
                 trakt_movies_set.add(guid)
-            elif item.TYPE == "show":
+            elif item_type == "show":
                 shows_to_add.append({"ids": data})
                 trakt_shows_set.add(guid)
         payload = {}
@@ -902,6 +914,7 @@ def sync_watchlist(
             if item:
                 add_to_plex.append(item)
                 plex_guids.add(guid)
+                plex_types[guid] = item.TYPE
         if add_to_plex:
             try:
                 account.addToWatchlist(add_to_plex)
@@ -916,11 +929,13 @@ def sync_watchlist(
                 if item:
                     account.removeFromWatchlist([item])
                     plex_guids.discard(guid)
+                    plex_types.pop(guid, None)
             except Exception:  # noqa: BLE001
                 pass
 
     # --- Save updated state ---
     state["plex"]["guids"] = list(plex_guids)
+    state["plex"]["types"] = plex_types
     state["plex"]["meta"] = {"size": total_size, "updated_at": latest_added_at}
     state["trakt"]["movies"] = list(trakt_movies_set)
     state["trakt"]["shows"] = list(trakt_shows_set)
