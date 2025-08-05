@@ -1748,9 +1748,63 @@ def validate_bidirectional_sync_config():
         logger.info("Note: Only owner accounts support bidirectional sync (Trakt/Simkl -> Plex)")
         return False
     
-    logger.debug("Bidirectional sync validation: User '%s' is owner - bidirectional sync enabled", 
+    logger.debug("Bidirectional sync validation: User '%s' is owner - bidirectional sync enabled",
                 selected_user.get("username", "Unknown"))
     return True
+
+
+def sync_watchlists_only(
+    plex=None,
+    headers=None,
+    plex_history=None,
+    trakt_history=None,
+):
+    """Synchronize Plex and Trakt watchlists without history sync."""
+    if stop_event.is_set():
+        logger.info("Sync cancelled")
+        return
+
+    plex_history = plex_history or set()
+    trakt_history = trakt_history or set()
+
+    # Allow standalone execution without pre-initialized clients
+    if plex is None or headers is None:
+        if SYNC_PROVIDER != "trakt":
+            logger.warning("Watchlist sync is only supported with Trakt provider.")
+            return
+        reset_cache()
+        if not test_connections():
+            logger.error("Watchlist sync cancelled due to connection errors.")
+            return
+        if plex is None:
+            plex = get_plex_server()
+            if plex is None:
+                logger.error("No Plex server available for watchlist sync")
+                return
+        if headers is None:
+            if not refresh_trakt_token():
+                logger.error("Failed to refresh Trakt token. Aborting watchlist sync.")
+                return
+            load_trakt_tokens()
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {os.environ.get('TRAKT_ACCESS_TOKEN')}",
+                "trakt-api-version": "2",
+                "trakt-api-key": os.environ["TRAKT_CLIENT_ID"],
+            }
+
+    try:
+        sync_watchlist(
+            plex,
+            headers,
+            plex_history,
+            trakt_history,
+            direction=WATCHLISTS_SYNC_DIRECTION,
+        )
+    except TraktAccountLimitError as exc:
+        logger.error("Watchlist sync skipped: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Watchlist sync failed: %s", exc)
 
 def sync():
     """Run the main synchronization logic with selected user."""
@@ -1960,22 +2014,6 @@ def sync():
                     logger.error("Liked-lists sync skipped: %s", exc)
                 except Exception as exc:
                     logger.error("Liked-lists sync failed: %s", exc)
-            if SYNC_WATCHLISTS:
-                if stop_event.is_set():
-                    logger.info("Sync cancelled")
-                    return
-                try:
-                    sync_watchlist(
-                        plex,
-                        headers,
-                        plex_movie_guids | plex_episode_guids,
-                        trakt_movie_guids | trakt_episode_guids,
-                        direction=WATCHLISTS_SYNC_DIRECTION,
-                    )
-                except TraktAccountLimitError as exc:
-                    logger.error("Watchlist sync skipped: %s", exc)
-                except Exception as exc:
-                    logger.error("Watchlist sync failed: %s", exc)
 
         elif SYNC_PROVIDER == "simkl":
             logger.info("Provider: Simkl")
@@ -2117,7 +2155,12 @@ def sync():
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
-        sync_watchlist(plex, headers, plex_movies, trakt_movies, direction=WATCHLISTS_SYNC_DIRECTION)
+        sync_watchlists_only(
+            plex,
+            headers,
+            plex_movie_guids | plex_episode_guids,
+            trakt_movie_guids | trakt_episode_guids,
+        )
     elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
 
@@ -2466,7 +2509,13 @@ def sync_once():
         )
 
     stop_event.clear()
-    Thread(target=sync).start()
+    only_watchlist = SYNC_WATCHLISTS and not any(
+        [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
+    )
+    if only_watchlist:
+        Thread(target=sync_watchlists_only).start()
+    else:
+        Thread(target=sync).start()
 
     return redirect(
         url_for(
@@ -2768,7 +2817,11 @@ def plex_webhook():
     if LIVE_SYNC:
         # Trigger a one-off sync immediately
         stop_event.clear()
-        scheduler.add_job(sync, "date", run_date=datetime.now())
+        only_watchlist = SYNC_WATCHLISTS and not any(
+            [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
+        )
+        job_func = sync_watchlists_only if only_watchlist else sync
+        scheduler.add_job(job_func, "date", run_date=datetime.now())
     return "", 204
 
 
@@ -3361,14 +3414,22 @@ def start_scheduler():
     logger.info("Removed existing scheduled job(s)")
 
     # Añadimos el nuevo trabajo periódico
+    only_watchlist = SYNC_WATCHLISTS and not any(
+        [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
+    )
+    job_func = sync_watchlists_only if only_watchlist else sync
     scheduler.add_job(
-        sync,
+        job_func,
         "interval",
         minutes=SYNC_INTERVAL_MINUTES,
         id="sync_job",
         replace_existing=True,
     )
-    logger.info("Sync job scheduled with interval %d minutes", SYNC_INTERVAL_MINUTES)
+    logger.info(
+        "%s job scheduled with interval %d minutes",
+        "Watchlist" if only_watchlist else "Sync",
+        SYNC_INTERVAL_MINUTES,
+    )
 
 
 def stop_scheduler():

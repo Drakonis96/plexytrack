@@ -684,14 +684,28 @@ def sync_collections_to_trakt(plex, headers):
                     logger.error("Failed updating list %s: %s", slug, exc)
 
 
-def sync_watchlist(plex, headers, plex_history, trakt_history, *, direction="both"):
+def sync_watchlist(
+    plex,
+    headers,
+    plex_history=None,
+    trakt_history=None,
+    *,
+    direction="both",
+):
     """Synchronize Plex and Trakt watchlists.
+
+    ``plex_history`` and ``trakt_history`` are optional sets of GUIDs that
+    represent already watched items. When omitted, empty sets are used so the
+    function can run without prior history retrieval.
 
     The function keeps both services' watchlists in sync without performing
     full downloads on every run. A small cache stores previous watchlists and
     only the services that changed are queried again. Removals on either side
     are propagated to the other to ensure true bidirectional behaviour.
     """
+
+    plex_history = plex_history or set()
+    trakt_history = trakt_history or set()
 
     # Import here to avoid circular imports
     from app import get_plex_account
