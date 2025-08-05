@@ -7,8 +7,8 @@ services:
       - .env
     environment:
       TZ: ${TZ:-Europe/Madrid}
-      PLEXYTRACK_CONFIG_DIR: /config
-      PLEXYTRACK_STATE_DIR: /state
+      PLEXYTRACK_CONFIG_DIR: ${PLEXYTRACK_CONFIG_DIR}
+      PLEXYTRACK_STATE_DIR: ${PLEXYTRACK_STATE_DIR}
       PLEX_BASEURL: ${PLEX_BASEURL}
       PLEX_TOKEN: ${PLEX_TOKEN}
       TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID}
