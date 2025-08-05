@@ -136,6 +136,8 @@ From the web interface you can download a backup file containing your Trakt hist
 When **Live Sync** is enabled on the main page, PlexyTrack will start a
 webhook endpoint at `/webhook`. Configure a Plex Webhook to call this URL and
 the application will trigger an immediate sync whenever an event is received.
+When the Simkl provider is selected, the received payload is also forwarded to
+Simkl's own `sync/plex/webhook` endpoint for instant updates.
 
 ## Getting a Plex token
 
