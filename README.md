@@ -214,6 +214,12 @@ docker-compose -f docker-compose-local.yml up --build
 
 That's it! The container will continue to sync your Plex account with Trakt and/or Simkl according to the interval you set.
 
+## Upgrade guide
+
+Upgrading from earlier versions requires no manual steps. On startup the
+application automatically migrates any legacy state and continues syncing
+without a full rescan.
+
 ## User Selection
 
 When using PlexyTrack with multiple Plex users (owner and managed users), you can choose which user's viewing history to synchronize.

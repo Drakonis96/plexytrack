@@ -30,7 +30,51 @@ _ratings_cache: Dict[str, Dict[str, float]] = {}
 DATA_DIR = os.environ.get("PLEXYTRACK_DATA_DIR", ".")
 STATE_DIR = os.path.join(DATA_DIR, "state")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
+CONFIG_DIR = os.path.join(DATA_DIR, "config")
+LEGACY_STATE_FILE = os.path.join(CONFIG_DIR, "state.json")
 STATE_SCHEMA_VERSION = 2
+
+
+def migrate_legacy_state() -> None:
+    """Migrate schema 1 state files to schema 2 layout if needed."""
+    legacy_path = None
+
+    if os.path.exists(LEGACY_STATE_FILE):
+        legacy_path = LEGACY_STATE_FILE
+    elif os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "schema" not in data:
+                legacy_path = STATE_FILE
+        except Exception:  # noqa: BLE001
+            legacy_path = STATE_FILE
+
+    if not legacy_path:
+        return
+
+    try:
+        with open(legacy_path, "r", encoding="utf-8") as f:
+            legacy = json.load(f)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to read legacy state file: %s", exc)
+        return
+
+    new_data = {
+        "schema": STATE_SCHEMA_VERSION,
+        "lastSync": legacy.get("lastSync"),
+        "guid_cache": legacy.get("guid_cache", {}),
+    }
+
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(new_data, f, indent=2)
+        if legacy_path != STATE_FILE and os.path.exists(legacy_path):
+            os.remove(legacy_path)
+        logger.info("Migrated legacy state to schema 2.")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to migrate legacy state: %s", exc)
 
 
 def _load_state() -> Dict[str, dict]:

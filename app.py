@@ -65,6 +65,7 @@ from plex_utils import (
     load_last_plex_sync,
     save_last_plex_sync,
     load_state,
+    migrate_legacy_state,
 )
 from trakt_utils import (
     trakt_request,
@@ -3885,6 +3886,7 @@ def clear_session_credentials():
 if __name__ == "__main__":
     logger.info("Starting PlexyTrackt application")
     verify_volume(CONFIG_DIR, "config")
+    migrate_legacy_state()
     verify_volume(STATE_DIR, "state")
     state_data = load_state()
     load_trakt_tokens()
