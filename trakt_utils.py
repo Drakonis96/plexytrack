@@ -848,7 +848,28 @@ def sync_watchlist(
 
     trakt_guids = trakt_movies_set | trakt_shows_set
 
-    # --- Compute differences ---
+    # --- Initial differences ---
+    only_in_plex = plex_guids - trakt_guids
+    only_in_trakt = trakt_guids - plex_guids
+
+    # --- Trakt -> Plex additions ---
+    if direction in ("both", "service_to_plex"):
+        add_to_plex = []
+        for guid in only_in_trakt:
+            item = find_item_by_guid(plex, guid)
+            if item:
+                add_to_plex.append(item)
+                plex_guids.add(guid)
+                plex_types[guid] = item.TYPE
+        if add_to_plex:
+            try:
+                account.addToWatchlist(add_to_plex)
+                logger.info("Added %d items to Plex watchlist", len(add_to_plex))
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed adding Plex watchlist items: %s", exc)
+
+    # Recompute differences after potential additions to Plex
+    trakt_guids = trakt_movies_set | trakt_shows_set
     only_in_plex = plex_guids - trakt_guids
     only_in_trakt = trakt_guids - plex_guids
 
@@ -883,7 +904,13 @@ def sync_watchlist(
                 "Added %d items to Trakt watchlist", len(movies_to_add) + len(shows_to_add)
             )
 
-        # Removals on Trakt for items missing on Plex
+    # Recompute differences after potential additions to Trakt
+    trakt_guids = trakt_movies_set | trakt_shows_set
+    only_in_plex = plex_guids - trakt_guids
+    only_in_trakt = trakt_guids - plex_guids
+
+    # --- Removals on Trakt for items missing on Plex ---
+    if direction in ("both", "plex_to_service"):
         movies_remove: List[dict] = []
         shows_remove: List[dict] = []
         for guid in only_in_trakt:
@@ -906,23 +933,12 @@ def sync_watchlist(
                 len(movies_remove) + len(shows_remove),
             )
 
-    # --- Trakt -> Plex additions ---
-    if direction in ("both", "service_to_plex"):
-        add_to_plex = []
-        for guid in only_in_trakt:
-            item = find_item_by_guid(plex, guid)
-            if item:
-                add_to_plex.append(item)
-                plex_guids.add(guid)
-                plex_types[guid] = item.TYPE
-        if add_to_plex:
-            try:
-                account.addToWatchlist(add_to_plex)
-                logger.info("Added %d items to Plex watchlist", len(add_to_plex))
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed adding Plex watchlist items: %s", exc)
+        # Update sets and recompute items only in Plex
+        trakt_guids = trakt_movies_set | trakt_shows_set
+        only_in_plex = plex_guids - trakt_guids
 
-        # Removals on Plex for items missing on Trakt
+    # --- Removals on Plex for items missing on Trakt ---
+    if direction in ("both", "service_to_plex"):
         for guid in list(only_in_plex):
             try:
                 item = find_item_by_guid(plex, guid)
