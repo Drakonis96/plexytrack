@@ -38,7 +38,7 @@ The application expects the following API credentials:
 
 ### Plex Authentication
 
-- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
+- `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`. If no scheme is provided, `http://` is assumed.
 - `PLEX_TOKEN` – your Plex authentication token.
 
 During synchronization the application first uses the credentials entered via the web interface and the token generated from that login. The direct server connection is made using the IP specified in `PLEX_BASEURL`. The legacy `PLEX_TOKEN`/`PLEX_BASEURL` method is only attempted if no session credentials are available.
@@ -101,7 +101,7 @@ If you don't already have the Trakt or Simkl credentials, please see the next se
 
    ```
    # Example .env
-   PLEX_BASEURL=your_plex_base_url
+   PLEX_BASEURL=http://your-plex-ip:32400
    PLEX_TOKEN=your_plex_token
    
    TRAKT_CLIENT_ID=YOUR_TRAKT_CLIENT_ID
@@ -172,7 +172,7 @@ Simkl's own `sync/plex/webhook` endpoint for instant updates.
 2. Create a `.env` file in the project root and define the variables listed above. Example:
 
 ```
-PLEX_BASEURL=your_plex_base_url
+PLEX_BASEURL=http://your-plex-ip:32400
 PLEX_TOKEN=your_plex_token
 
 #PLEX_EMAIL=your_plex_email@example.com #Better to provide it through the webUI

@@ -316,12 +316,22 @@ def get_simkl_redirect_uri() -> str:
     return "http://localhost:5030/oauth/simkl"
 
 
+def normalize_baseurl(url: Optional[str]) -> Optional[str]:
+    """Ensure the Plex base URL includes a scheme and no trailing slash."""
+    if not url:
+        return None
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
+    return url.rstrip("/")
+
+
 def get_plex_server_legacy():
     """
     Legacy fallback method using token authentication.
     Used when credentials are not provided.
     """
-    baseurl = os.environ.get("PLEX_BASEURL")
+    baseurl = normalize_baseurl(os.environ.get("PLEX_BASEURL"))
     token = os.environ.get("PLEX_TOKEN")
     if not baseurl or not token:
         return None
@@ -357,6 +367,7 @@ def get_plex_server():
         # Always honor the configured base URL if not set in session
         if not baseurl:
             baseurl = os.environ.get("PLEX_BASEURL")
+        baseurl = normalize_baseurl(baseurl)
 
         # Fall back to environment variables if session data not available
         if not token:
@@ -3047,7 +3058,7 @@ def api_auth_plex():
         session['plex_email'] = email
         session['plex_password'] = password
         session['plex_token'] = account.authToken  # Store the authentication token
-        baseurl = os.environ.get("PLEX_BASEURL")
+        baseurl = normalize_baseurl(os.environ.get("PLEX_BASEURL"))
         if baseurl:
             session['plex_baseurl'] = baseurl
         if code:
@@ -3386,7 +3397,7 @@ def test_connections() -> bool:
         plex_email = os.environ.get("PLEX_EMAIL")
         plex_password = os.environ.get("PLEX_PASSWORD")
     
-    plex_baseurl = os.environ.get("PLEX_BASEURL")
+    plex_baseurl = normalize_baseurl(os.environ.get("PLEX_BASEURL"))
     plex_env_token = os.environ.get("PLEX_TOKEN")
     
     # Use environment token only if no session token is available
@@ -3886,7 +3897,7 @@ def save_session_credentials(email, password, code=None, token=None, baseurl=Non
     session_plex_credentials['password'] = password
     session_plex_credentials['code'] = code
     session_plex_credentials['token'] = token
-    session_plex_credentials['baseurl'] = baseurl
+    session_plex_credentials['baseurl'] = normalize_baseurl(baseurl)
     logger.info("Session credentials saved for scheduler access")
 
 def get_session_credentials():
