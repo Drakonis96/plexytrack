@@ -32,31 +32,41 @@ APP_NAME = "PlexyTrack"
 APP_VERSION = "v0.4.2"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
+STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
-WATCHLIST_STATE_FILE = "watchlist_state.json"
+WATCHLIST_STATE_FILE = os.path.join(STATE_DIR, "watchlist_state.json")
 
 
 def load_watchlist_state() -> dict:
     """Return the cached watchlist state if available."""
+    # Ensure state directory exists
+    os.makedirs(os.path.dirname(WATCHLIST_STATE_FILE), exist_ok=True)
+    
     if os.path.exists(WATCHLIST_STATE_FILE):
         try:
             with open(WATCHLIST_STATE_FILE, "r", encoding="utf-8") as f:
+                logger.debug("Loading watchlist state from %s", WATCHLIST_STATE_FILE)
                 return json.load(f)
         except Exception as exc:
-            logger.debug("Failed to load watchlist state: %s", exc)
+            logger.warning("Failed to load watchlist state: %s", exc)
+    else:
+        logger.debug("No existing watchlist state file found at %s", WATCHLIST_STATE_FILE)
     return {
-        "plex": {"guids": [], "types": {}, "meta": {}},
-        "trakt": {"movies": [], "shows": [], "last_activity": None},
+        "plex": {"guids": [], "types": {}, "meta": {}, "last_sync": None},
+        "trakt": {"movies": [], "shows": [], "last_activity": None, "last_sync": None},
     }
 
 
 def save_watchlist_state(state: dict) -> None:
     """Persist watchlist ``state`` to disk."""
     try:
+        # Ensure state directory exists
+        os.makedirs(os.path.dirname(WATCHLIST_STATE_FILE), exist_ok=True)
         with open(WATCHLIST_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
+        logger.debug("Saved watchlist state to %s", WATCHLIST_STATE_FILE)
     except Exception as exc:
-        logger.debug("Failed to save watchlist state: %s", exc)
+        logger.warning("Failed to save watchlist state: %s", exc)
 
 
 def load_auth() -> dict:
@@ -739,17 +749,16 @@ def sync_watchlist(
     *,
     direction="both",
 ):
-    """Synchronize Plex and Trakt watchlists.
+    """Synchronize Plex and Trakt watchlists with 'Last Action Wins' behavior.
 
-    ``plex_history`` and ``trakt_history`` are optional sets of GUIDs that
-    represent already watched items. When omitted, empty sets are used so the
-    function can run without prior history retrieval.
-
-    The function keeps both services' watchlists in sync without performing
-    full downloads on every run. A small cache stores previous watchlists and
-    only the services that changed are queried again. Removals on either side
-    are propagated to the other to ensure true bidirectional behaviour.
+    This implementation tracks changes since the last sync and applies them
+    unidirectionally to respect user intentions and prevent infinite re-additions.
     """
+    from datetime import datetime
+    from app import WATCHLIST_CONFLICT_RESOLUTION, WATCHLIST_REMOVAL_ENABLED
+    
+    logger.info("Starting watchlist sync (direction: %s, resolution: %s)", 
+                direction, WATCHLIST_CONFLICT_RESOLUTION)
 
     plex_history = plex_history or set()
     trakt_history = trakt_history or set()
@@ -757,213 +766,285 @@ def sync_watchlist(
     # Import here to avoid circular imports
     from app import get_plex_account
 
+    logger.debug("Loading watchlist state...")
     state = load_watchlist_state()
 
+    logger.debug("Getting Plex account...")
     account = get_plex_account()
     if account is None:
         try:
+            logger.debug("Attempting to get account from plex server...")
             account = plex.myPlexAccount()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to get Plex account from server: %s", exc)
             account = None
     if account is None:
         logger.error("No Plex account available for watchlist sync")
         return
 
-    # --- Determine if Trakt watchlist changed ---
-    trakt_state = state.get("trakt", {})
-    trakt_movies_set = set(trakt_state.get("movies", []))
-    trakt_shows_set = set(trakt_state.get("shows", []))
-    trakt_last_activity = trakt_state.get("last_activity")
-    current_trakt_activity = trakt_last_activity
+    current_time = datetime.utcnow().isoformat() + "Z"
+    
+    # Get current watchlists from both platforms
+    logger.info("Fetching current watchlists from both platforms...")
+    
+    # Fetch current Trakt watchlist
     try:
-        activities = trakt_request("GET", "/sync/activities", headers).json()
-        current_trakt_activity = activities.get("watchlist", {}).get("updated_at")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Failed to fetch Trakt activities: %s", exc)
+        trakt_movies = trakt_request("GET", "/sync/watchlist/movies", headers).json()
+        trakt_shows = trakt_request("GET", "/sync/watchlist/shows", headers).json()
+        logger.debug("Fetched %d movies and %d shows from Trakt watchlist", 
+                    len(trakt_movies), len(trakt_shows))
+    except Exception as exc:
+        logger.error("Failed to fetch Trakt watchlist: %s", exc)
+        return
+        
+    current_trakt_guids = set()
+    for it in trakt_movies:
+        ids = it.get("movie", {}).get("ids", {})
+        if ids.get("imdb"):
+            current_trakt_guids.add(f"imdb://{ids['imdb']}")
+        elif ids.get("tmdb"):
+            current_trakt_guids.add(f"tmdb://{ids['tmdb']}")
+        elif ids.get("tvdb"):
+            current_trakt_guids.add(f"tvdb://{ids['tvdb']}")
+    for it in trakt_shows:
+        ids = it.get("show", {}).get("ids", {})
+        if ids.get("imdb"):
+            current_trakt_guids.add(f"imdb://{ids['imdb']}")
+        elif ids.get("tmdb"):
+            current_trakt_guids.add(f"tmdb://{ids['tmdb']}")
+        elif ids.get("tvdb"):
+            current_trakt_guids.add(f"tvdb://{ids['tvdb']}")
 
-    if current_trakt_activity != trakt_last_activity:
-        try:
-            trakt_movies = trakt_request("GET", "/sync/watchlist/movies", headers).json()
-            trakt_shows = trakt_request("GET", "/sync/watchlist/shows", headers).json()
-        except Exception as exc:
-            logger.error("Failed to fetch Trakt watchlist: %s", exc)
-            return
-        trakt_movies_set = set()
-        for it in trakt_movies:
-            ids = it.get("movie", {}).get("ids", {})
-            if ids.get("imdb"):
-                trakt_movies_set.add(f"imdb://{ids['imdb']}")
-            elif ids.get("tmdb"):
-                trakt_movies_set.add(f"tmdb://{ids['tmdb']}")
-            elif ids.get("tvdb"):
-                trakt_movies_set.add(f"tvdb://{ids['tvdb']}")
-        trakt_shows_set = set()
-        for it in trakt_shows:
-            ids = it.get("show", {}).get("ids", {})
-            if ids.get("imdb"):
-                trakt_shows_set.add(f"imdb://{ids['imdb']}")
-            elif ids.get("tmdb"):
-                trakt_shows_set.add(f"tmdb://{ids['tmdb']}")
-            elif ids.get("tvdb"):
-                trakt_shows_set.add(f"tvdb://{ids['tvdb']}")
-        state["trakt"] = {
-            "movies": list(trakt_movies_set),
-            "shows": list(trakt_shows_set),
-            "last_activity": current_trakt_activity,
-        }
-
-    trakt_guids = trakt_movies_set | trakt_shows_set
-
-    # --- Determine if Plex watchlist changed ---
-    plex_state = state.get("plex", {})
-    plex_meta = plex_state.get("meta", {})
-    plex_guids = set(plex_state.get("guids", []))
-    plex_types = plex_state.get("types", {})
-    plex_changed = True
-    total_size = plex_meta.get("size")
-    latest_added_at = plex_meta.get("updated_at")
+    # Fetch current Plex watchlist
     try:
-        meta_list = account.watchlist(sort="watchlistedAt:desc", maxresults=1)
-        total_size = getattr(meta_list, "totalSize", len(meta_list))
-        latest_added_at = to_iso_z(getattr(meta_list[0], "watchlistedAt", None)) if meta_list else None
-        if (
-            plex_meta.get("size") == total_size
-            and plex_meta.get("updated_at") == latest_added_at
-        ):
-            plex_changed = False
+        plex_watch = account.watchlist()
+        logger.debug("Fetched %d items from Plex watchlist", len(plex_watch))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("Failed to fetch Plex watchlist metadata: %s", exc)
+        logger.error("Failed to fetch Plex watchlist: %s", exc)
+        plex_watch = []
+        
+    current_plex_guids = set()
+    current_plex_types = {}
+    for item in plex_watch:
+        g = imdb_guid(item)
+        if g:
+            current_plex_guids.add(g)
+            current_plex_types[g] = item.TYPE
 
-    if plex_changed:
-        try:
-            plex_watch = account.watchlist()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to fetch Plex watchlist: %s", exc)
-            plex_watch = []
-        plex_guids = set()
-        plex_types = {}
-        for item in plex_watch:
-            g = imdb_guid(item)
-            if g:
-                plex_guids.add(g)
-                plex_types[g] = item.TYPE
-        state["plex"] = {
-            "guids": list(plex_guids),
-            "types": plex_types,
-            "meta": {"size": total_size, "updated_at": latest_added_at},
-        }
+    # Get previous state
+    previous_trakt_guids = set(state.get("trakt", {}).get("movies", []) + state.get("trakt", {}).get("shows", []))
+    previous_plex_guids = set(state.get("plex", {}).get("guids", []))
+    previous_plex_types = state.get("plex", {}).get("types", {})
+    
+    logger.info("Watchlist comparison:")
+    logger.info("  Previous: %d Plex, %d Trakt", len(previous_plex_guids), len(previous_trakt_guids))
+    logger.info("  Current:  %d Plex, %d Trakt", len(current_plex_guids), len(current_trakt_guids))
 
-    trakt_guids = trakt_movies_set | trakt_shows_set
+    # Detect changes since last sync
+    plex_added = current_plex_guids - previous_plex_guids
+    plex_removed = previous_plex_guids - current_plex_guids
+    trakt_added = current_trakt_guids - previous_trakt_guids
+    trakt_removed = previous_trakt_guids - current_trakt_guids
 
-    # --- Initial differences ---
-    only_in_plex = plex_guids - trakt_guids
-    only_in_trakt = trakt_guids - plex_guids
+    logger.info("Detected changes since last sync:")
+    logger.info("  Plex: +%d added, -%d removed", len(plex_added), len(plex_removed))
+    logger.info("  Trakt: +%d added, -%d removed", len(trakt_added), len(trakt_removed))
 
-    # --- Trakt -> Plex additions ---
-    if direction in ("both", "service_to_plex"):
-        add_to_plex = []
-        for guid in only_in_trakt:
-            item = find_item_by_guid(plex, guid)
-            if item:
-                add_to_plex.append(item)
-                plex_guids.add(guid)
-                plex_types[guid] = item.TYPE
-        if add_to_plex:
-            try:
-                account.addToWatchlist(add_to_plex)
-                logger.info("Added %d items to Plex watchlist", len(add_to_plex))
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed adding Plex watchlist items: %s", exc)
+    if WATCHLIST_CONFLICT_RESOLUTION == "additive_only":
+        logger.info("Using additive-only mode: only additions will be synced")
+        plex_removed = set()
+        trakt_removed = set()
+    elif WATCHLIST_CONFLICT_RESOLUTION == "last_wins":
+        logger.info("Using last-action-wins mode: changes will be applied bidirectionally")
+    
+    changes_made = False
 
-    # Recompute differences after potential additions to Plex
-    trakt_guids = trakt_movies_set | trakt_shows_set
-    only_in_plex = plex_guids - trakt_guids
-    only_in_trakt = trakt_guids - plex_guids
-
-    # --- Plex -> Trakt additions ---
+    # Apply Plex changes to Trakt
     if direction in ("both", "plex_to_service"):
-        movies_to_add: List[dict] = []
-        shows_to_add: List[dict] = []
-        for guid in only_in_plex:
-            item_type = plex_types.get(guid)
-            if item_type is None:
-                item = find_item_by_guid(plex, guid)
-                if not item:
-                    continue
-                item_type = getattr(item, "TYPE", None)
-                if item_type:
-                    plex_types[guid] = item_type
-            data = guid_to_ids(guid)
-            if item_type == "movie":
-                movies_to_add.append({"ids": data})
-                trakt_movies_set.add(guid)
-            elif item_type == "show":
-                shows_to_add.append({"ids": data})
-                trakt_shows_set.add(guid)
-        payload = {}
-        if movies_to_add:
-            payload["movies"] = movies_to_add
-        if shows_to_add:
-            payload["shows"] = shows_to_add
-        if payload:
-            trakt_request("POST", "/sync/watchlist", headers, json=payload)
-            logger.info(
-                "Added %d items to Trakt watchlist", len(movies_to_add) + len(shows_to_add)
-            )
+        # Add items that were added to Plex
+        if plex_added:
+            logger.info("Applying %d Plex additions to Trakt", len(plex_added))
+            movies_to_add = []
+            shows_to_add = []
+            for guid in plex_added:
+                item_type = current_plex_types.get(guid)
+                if not item_type:
+                    # Try to determine type from Plex item
+                    item = find_item_by_guid(plex, guid)
+                    if item:
+                        item_type = getattr(item, "TYPE", None)
+                        current_plex_types[guid] = item_type
+                
+                data = guid_to_ids(guid)
+                if item_type == "movie":
+                    movies_to_add.append({"ids": data})
+                elif item_type == "show":
+                    shows_to_add.append({"ids": data})
+            
+            if movies_to_add or shows_to_add:
+                payload = {}
+                if movies_to_add:
+                    payload["movies"] = movies_to_add
+                if shows_to_add:
+                    payload["shows"] = shows_to_add
+                try:
+                    trakt_request("POST", "/sync/watchlist", headers, json=payload)
+                    logger.info("Successfully added %d items to Trakt watchlist", 
+                               len(movies_to_add) + len(shows_to_add))
+                    changes_made = True
+                except Exception as exc:
+                    logger.error("Failed to add items to Trakt watchlist: %s", exc)
 
-    # Recompute differences after potential additions to Trakt
-    trakt_guids = trakt_movies_set | trakt_shows_set
-    only_in_plex = plex_guids - trakt_guids
-    only_in_trakt = trakt_guids - plex_guids
+        # Remove items that were removed from Plex
+        if plex_removed and WATCHLIST_REMOVAL_ENABLED:
+            logger.info("Applying %d Plex removals to Trakt", len(plex_removed))
+            movies_to_remove = []
+            shows_to_remove = []
+            for guid in plex_removed:
+                data = guid_to_ids(guid)
+                item_type = previous_plex_types.get(guid)
+                if item_type == "movie":
+                    movies_to_remove.append({"ids": data})
+                elif item_type == "show":
+                    shows_to_remove.append({"ids": data})
+                else:
+                    # Best guess based on current Trakt data
+                    if guid in current_trakt_guids:
+                        movies_to_remove.append({"ids": data})
+                        
+            if movies_to_remove or shows_to_remove:
+                payload = {}
+                if movies_to_remove:
+                    payload["movies"] = movies_to_remove
+                if shows_to_remove:
+                    payload["shows"] = shows_to_remove
+                try:
+                    trakt_request("POST", "/sync/watchlist/remove", headers, json=payload)
+                    logger.info("Successfully removed %d items from Trakt watchlist", 
+                               len(movies_to_remove) + len(shows_to_remove))
+                    changes_made = True
+                except Exception as exc:
+                    logger.error("Failed to remove items from Trakt watchlist: %s", exc)
 
-    # --- Removals on Trakt for items missing on Plex ---
-    if direction in ("both", "plex_to_service"):
-        movies_remove: List[dict] = []
-        shows_remove: List[dict] = []
-        for guid in only_in_trakt:
-            ids = guid_to_ids(guid)
-            if guid in trakt_movies_set:
-                movies_remove.append({"ids": ids})
-                trakt_movies_set.discard(guid)
-            elif guid in trakt_shows_set:
-                shows_remove.append({"ids": ids})
-                trakt_shows_set.discard(guid)
-        if movies_remove or shows_remove:
-            rem_payload = {}
-            if movies_remove:
-                rem_payload["movies"] = movies_remove
-            if shows_remove:
-                rem_payload["shows"] = shows_remove
-            trakt_request("POST", "/sync/watchlist/remove", headers, json=rem_payload)
-            logger.info(
-                "Removed %d items from Trakt watchlist",
-                len(movies_remove) + len(shows_remove),
-            )
-
-        # Update sets and recompute items only in Plex
-        trakt_guids = trakt_movies_set | trakt_shows_set
-        only_in_plex = plex_guids - trakt_guids
-
-    # --- Removals on Plex for items missing on Trakt ---
+    # Apply Trakt changes to Plex
     if direction in ("both", "service_to_plex"):
-        for guid in list(only_in_plex):
-            try:
+        # Add items that were added to Trakt
+        if trakt_added:
+            logger.info("Applying %d Trakt additions to Plex", len(trakt_added))
+            add_to_plex = []
+            items_not_found = []
+            for guid in trakt_added:
+                logger.debug("Looking for Trakt item %s in Plex library", guid)
                 item = find_item_by_guid(plex, guid)
                 if item:
-                    account.removeFromWatchlist([item])
-                    plex_guids.discard(guid)
-                    plex_types.pop(guid, None)
-            except Exception:  # noqa: BLE001
-                pass
+                    add_to_plex.append(item)
+                    current_plex_types[guid] = item.TYPE
+                    logger.debug("Found item: %s", getattr(item, 'title', guid))
+                else:
+                    items_not_found.append(guid)
+                    logger.debug("Item not found in Plex library: %s", guid)
+            
+            if items_not_found:
+                logger.info("%d items from Trakt not found in Plex library", len(items_not_found))
+                
+            if add_to_plex:
+                try:
+                    account.addToWatchlist(add_to_plex)
+                    logger.info("Successfully added %d items to Plex watchlist", len(add_to_plex))
+                    changes_made = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Failed adding Plex watchlist items: %s", exc)
 
-    # --- Save updated state ---
-    state["plex"]["guids"] = list(plex_guids)
-    state["plex"]["types"] = plex_types
-    state["plex"]["meta"] = {"size": total_size, "updated_at": latest_added_at}
-    state["trakt"]["movies"] = list(trakt_movies_set)
-    state["trakt"]["shows"] = list(trakt_shows_set)
-    state["trakt"]["last_activity"] = current_trakt_activity
-    save_watchlist_state(state)
+        # Remove items that were removed from Trakt
+        if trakt_removed and WATCHLIST_REMOVAL_ENABLED:
+            logger.info("Applying %d Trakt removals to Plex", len(trakt_removed))
+            removed_count = 0
+            for guid in trakt_removed:
+                try:
+                    logger.debug("Looking for item %s to remove from Plex", guid)
+                    item = find_item_by_guid(plex, guid)
+                    if item:
+                        logger.debug("Removing item '%s' from Plex watchlist", getattr(item, 'title', guid))
+                        account.removeFromWatchlist([item])
+                        removed_count += 1
+                        changes_made = True
+                    else:
+                        logger.debug("Item %s not found in Plex library for removal", guid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Failed to remove item %s from Plex watchlist: %s", guid, exc)
+            
+            if removed_count > 0:
+                logger.info("Successfully removed %d items from Plex watchlist", removed_count)
+
+    # Update state with current data
+    logger.debug("Saving updated watchlist state...")
+    try:
+        # Recalculate current state after changes
+        if changes_made:
+            # Re-fetch current state if we made changes
+            try:
+                plex_watch = account.watchlist()
+                current_plex_guids = set()
+                current_plex_types = {}
+                for item in plex_watch:
+                    g = imdb_guid(item)
+                    if g:
+                        current_plex_guids.add(g)
+                        current_plex_types[g] = item.TYPE
+                        
+                trakt_movies = trakt_request("GET", "/sync/watchlist/movies", headers).json()
+                trakt_shows = trakt_request("GET", "/sync/watchlist/shows", headers).json()
+                current_trakt_movies = []
+                current_trakt_shows = []
+                for it in trakt_movies:
+                    ids = it.get("movie", {}).get("ids", {})
+                    if ids.get("imdb"):
+                        current_trakt_movies.append(f"imdb://{ids['imdb']}")
+                    elif ids.get("tmdb"):
+                        current_trakt_movies.append(f"tmdb://{ids['tmdb']}")
+                    elif ids.get("tvdb"):
+                        current_trakt_movies.append(f"tvdb://{ids['tvdb']}")
+                for it in trakt_shows:
+                    ids = it.get("show", {}).get("ids", {})
+                    if ids.get("imdb"):
+                        current_trakt_shows.append(f"imdb://{ids['imdb']}")
+                    elif ids.get("tmdb"):
+                        current_trakt_shows.append(f"tmdb://{ids['tmdb']}")
+                    elif ids.get("tvdb"):
+                        current_trakt_shows.append(f"tvdb://{ids['tvdb']}")
+            except Exception as exc:
+                logger.warning("Failed to re-fetch watchlists after changes: %s", exc)
+        else:
+            # Use the data we already fetched
+            current_trakt_movies = [g for g in current_trakt_guids if previous_plex_types.get(g) == "movie"]
+            current_trakt_shows = [g for g in current_trakt_guids if previous_plex_types.get(g) == "show"]
+            # Fill in missing types
+            for g in current_trakt_guids:
+                if g not in current_trakt_movies and g not in current_trakt_shows:
+                    current_trakt_movies.append(g)  # Default to movie if unknown
+
+        # Get Plex watchlist metadata
+        total_size = len(current_plex_guids)
+        latest_added_at = current_time  # Use current time as proxy
+        
+        state["plex"] = {
+            "guids": list(current_plex_guids),
+            "types": current_plex_types,
+            "meta": {"size": total_size, "updated_at": latest_added_at},
+            "last_sync": current_time,
+        }
+        state["trakt"] = {
+            "movies": current_trakt_movies,
+            "shows": current_trakt_shows,
+            "last_activity": current_time,
+            "last_sync": current_time,
+        }
+        save_watchlist_state(state)
+        logger.debug("Watchlist state saved successfully")
+    except Exception as exc:
+        logger.error("Failed to save watchlist state: %s", exc)
+    
+    logger.info("Watchlist sync completed successfully (changes made: %s)", changes_made)
 
 
 def fetch_trakt_history_full(headers) -> list:

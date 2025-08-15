@@ -165,6 +165,10 @@ WATCHLISTS_SYNC_DIRECTION = DIRECTION_BOTH
 RATINGS_SYNC_DIRECTION = DIRECTION_BOTH
 COLLECTION_SYNC_DIRECTION = DIRECTION_BOTH
 
+# Watchlist sync behavior
+WATCHLIST_CONFLICT_RESOLUTION = "last_wins"  # "last_wins" | "additive_only" | "manual"
+WATCHLIST_REMOVAL_ENABLED = True
+
 # Global storage for session-based Plex credentials (for scheduler access)
 session_plex_credentials = {
     'token': None,    # Authentication token obtained via web login
@@ -235,6 +239,7 @@ def load_settings() -> None:
     global SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION
     global WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
+    global WATCHLIST_CONFLICT_RESOLUTION, WATCHLIST_REMOVAL_ENABLED
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -255,6 +260,8 @@ def load_settings() -> None:
             COLLECTION_SYNC_DIRECTION = data.get(
                 "collection_direction", COLLECTION_SYNC_DIRECTION
             )
+            WATCHLIST_CONFLICT_RESOLUTION = data.get("watchlist_conflict_resolution", WATCHLIST_CONFLICT_RESOLUTION)
+            WATCHLIST_REMOVAL_ENABLED = data.get("watchlist_removal_enabled", WATCHLIST_REMOVAL_ENABLED)
             logger.info("Loaded sync settings from %s", SETTINGS_FILE)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to load settings: %s", exc)
@@ -275,6 +282,8 @@ def save_settings() -> None:
         "watchlists_direction": WATCHLISTS_SYNC_DIRECTION,
         "ratings_direction": RATINGS_SYNC_DIRECTION,
         "collection_direction": COLLECTION_SYNC_DIRECTION,
+        "watchlist_conflict_resolution": WATCHLIST_CONFLICT_RESOLUTION,
+        "watchlist_removal_enabled": WATCHLIST_REMOVAL_ENABLED,
     }
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -1711,15 +1720,20 @@ def sync_watchlists_only(
     trakt_history=None,
 ):
     """Synchronize Plex and Trakt watchlists without history sync."""
+    logger.debug("Starting watchlist-only sync...")
+    
     if stop_event.is_set():
         logger.info("Sync cancelled")
         return
 
     plex_history = plex_history or set()
     trakt_history = trakt_history or set()
+    
+    logger.debug("Plex history size: %d, Trakt history size: %d", len(plex_history), len(trakt_history))
 
     # Allow standalone execution without pre-initialized clients
     if plex is None or headers is None:
+        logger.debug("Initializing clients for standalone watchlist sync...")
         if SYNC_PROVIDER != "trakt":
             logger.warning("Watchlist sync is only supported with Trakt provider.")
             return
@@ -1728,11 +1742,13 @@ def sync_watchlists_only(
             logger.error("Watchlist sync cancelled due to connection errors.")
             return
         if plex is None:
+            logger.debug("Getting Plex server...")
             plex = get_plex_server()
             if plex is None:
                 logger.error("No Plex server available for watchlist sync")
                 return
         if headers is None:
+            logger.debug("Setting up Trakt headers...")
             if not refresh_trakt_token():
                 logger.error("Failed to refresh Trakt token. Aborting watchlist sync.")
                 return
@@ -1744,6 +1760,7 @@ def sync_watchlists_only(
                 "trakt-api-key": os.environ["TRAKT_CLIENT_ID"],
             }
 
+    logger.debug("Calling sync_watchlist function...")
     try:
         sync_watchlist(
             plex,
@@ -1752,10 +1769,13 @@ def sync_watchlists_only(
             trakt_history,
             direction=WATCHLISTS_SYNC_DIRECTION,
         )
+        logger.debug("Watchlist sync completed successfully")
     except TraktAccountLimitError as exc:
         logger.error("Watchlist sync skipped: %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.error("Watchlist sync failed: %s", exc)
+        import traceback
+        logger.debug("Watchlist sync traceback: %s", traceback.format_exc())
 
 def sync():
     """Run the main synchronization logic with selected user."""
@@ -2111,11 +2131,21 @@ def sync():
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
+        # Ensure these variables are defined, initialize as empty sets if not
+        try:
+            plex_history_guids = plex_movie_guids | plex_episode_guids
+            trakt_history_guids = trakt_movie_guids | trakt_episode_guids
+        except NameError:
+            # Variables not defined (e.g., if only watchlist sync is enabled)
+            logger.debug("History variables not defined, using empty sets for watchlist sync")
+            plex_history_guids = set()
+            trakt_history_guids = set()
+        
         sync_watchlists_only(
             plex,
             headers,
-            plex_movie_guids | plex_episode_guids,
-            trakt_movie_guids | trakt_episode_guids,
+            plex_history_guids,
+            trakt_history_guids,
         )
     elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
