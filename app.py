@@ -332,6 +332,21 @@ def normalize_baseurl(url: Optional[str]) -> Optional[str]:
     return url.rstrip("/")
 
 
+def _build_plex_session() -> requests.Session:
+    """Return a configured requests.Session for Plex connections.
+
+    Honors env PLEX_VERIFY_SSL (true/false). Defaults to False to support
+    connecting via https to IPs without valid certs. Disables proxy inheritance
+    from the environment to avoid accidental rerouting.
+    """
+    sess = requests.Session()
+    verify_env = os.environ.get("PLEX_VERIFY_SSL", "false").strip().lower()
+    sess.verify = verify_env in ("1", "true", "yes", "on")
+    # Avoid environment proxies interfering with local connections
+    sess.trust_env = False
+    return sess
+
+
 def get_plex_server_legacy():
     """
     Legacy fallback method using token authentication.
@@ -343,7 +358,7 @@ def get_plex_server_legacy():
         return None
     try:
         from plexapi.server import PlexServer
-        return PlexServer(baseurl, token)
+        return PlexServer(baseurl, token, session=_build_plex_session())
     except Exception as exc:
         logger.error("Failed to connect to Plex using legacy token method: %s", exc)
         return None
@@ -376,8 +391,17 @@ def get_plex_server():
         if token and baseurl:
             try:
                 from plexapi.server import PlexServer
-                plex = PlexServer(baseurl, token)
-                plex_account = MyPlexAccount(token=token)
+                plex = PlexServer(baseurl, token, session=_build_plex_session())
+                # Create MyPlexAccount only when absolutely necessary, and cache the account ID
+                try:
+                    temp_account = MyPlexAccount(token=token)
+                    # Cache the account ID to avoid future auto-discovery calls
+                    plex._cached_account_id = temp_account.id
+                    plex_account = temp_account
+                except Exception as acc_exc:
+                    logger.warning("Could not create MyPlexAccount: %s", acc_exc)
+                    plex_account = None
+                    plex._cached_account_id = None
                 logger.info("Successfully connected to Plex using token and configured base URL")
                 return plex
             except Exception as exc:
@@ -1902,6 +1926,19 @@ def sync():
             # Bidirectional sync: Mark missing items as watched for selected user (only for owner users)
             if HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX) and selected_user.get("is_owner", False):
                 if missing_movies or missing_episodes:
+                    total_items = len(missing_movies) + len(missing_episodes)
+                    
+                    # Safety check: if too many items, ask for confirmation or skip
+                    if total_items > 100:
+                        logger.warning("Bidirectional sync wants to mark %d items as watched. This is a large number!", total_items)
+                        logger.warning("This might indicate that your Plex history isn't being read correctly.")
+                        logger.warning("Consider checking your Plex connection and running a manual sync first.")
+                        
+                        # For safety, limit to first 50 items of each type
+                        missing_movies = list(missing_movies)[:50]
+                        missing_episodes = list(missing_episodes)[:50]
+                        logger.warning("Limiting bidirectional sync to first 50 movies and 50 episodes for safety.")
+                    
                     start_time = time.time()
                     logger.info("Bidirectional sync: Marking %d movies and %d episodes as watched for user %s (%s)", 
                                len(missing_movies), len(missing_episodes), 
@@ -3674,8 +3711,17 @@ def mark_as_watched_for_user(
                     try:
                         user_account = account.switchHomeUser(managed_user.title)
                         if user_account:
-                            # Connect to server with managed user account
-                            user_plex = user_account.resource(plex_server.friendlyName).connect()
+                            # Connect to server with managed user account strictly via configured base URL
+                            try:
+                                from plexapi.server import PlexServer as _PlexServer
+                                managed_baseurl = normalize_baseurl(os.environ.get("PLEX_BASEURL"))
+                                managed_token = getattr(user_account, 'authToken', None)
+                                if not managed_baseurl or not managed_token:
+                                    raise RuntimeError("Missing PLEX_BASEURL or managed user token")
+                                user_plex = _PlexServer(managed_baseurl, managed_token)
+                            except Exception as connect_exc:
+                                logger.error("Failed to connect to Plex as managed user strictly via PLEX_BASEURL: %s", connect_exc)
+                                return False
                             
                             # Find the item from the managed user's perspective
                             user_item = find_item_by_guid(user_plex, item_guid)
