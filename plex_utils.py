@@ -219,13 +219,30 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
     episodes: Dict[str, Dict[str, Optional[str]]] = {}
 
     logger.info(
-        "Fetching owner history using MyPlexAccount%s",
+        "Fetching owner history using configured Plex server%s",
         f" since {mindate}" if mindate else " (full sync)",
     )
 
     try:
-        # Get owner history, optionally filtered by mindate
-        history_items = account.history(mindate=mindate, maxresults=None)
+        # Use the configured Plex server to get history instead of account.history()
+        # This avoids auto-discovery issues in Docker environments
+        from app import get_plex_server
+        plex_server = get_plex_server()
+        if not plex_server:
+            logger.error("No Plex server available for owner history")
+            return movies, episodes
+        
+        # Get account ID from server instead of MyPlexAccount to avoid auto-discovery
+        try:
+            server_account = plex_server.account()
+            account_id = server_account.id
+        except Exception as exc:
+            logger.warning("Could not get account ID from server, falling back to MyPlexAccount: %s", exc)
+            # Fallback to cached value or MyPlexAccount.id
+            account_id = getattr(plex_server, '_cached_account_id', None) or account.id
+        
+        # Get owner history from the server, filtered by account ID
+        history_items = plex_server.history(accountID=account_id, mindate=mindate, maxresults=None)
 
         for entry in history_items:
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
@@ -296,25 +313,13 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
     # Escanear elementos marcados manualmente como vistos (viewCount > 0)
     logger.info("Scanning for manually marked watched items for owner...")
     try:
-        # Obtener el servidor principal del owner
-        server_name = os.environ.get("PLEX_SERVER_NAME")
-        plex_server = None
-        if server_name:
-            try:
-                plex_server = account.server(server_name)
-                logger.debug("Successfully got server %s for owner", server_name)
-            except Exception as exc:
-                logger.warning("Failed to get specific server %s for owner: %s", server_name, exc)
+        # Use the configured Plex server instead of auto-discovery
+        from app import get_plex_server
+        plex_server = get_plex_server()
         if not plex_server:
-            try:
-                resources = account.resources()
-                for resource in resources:
-                    if resource.provides and "server" in resource.provides:
-                        plex_server = resource.connect()
-                        logger.info("Using first available server: %s", plex_server.friendlyName)
-                        break
-            except Exception as exc:
-                logger.warning("Failed to get any server for owner: %s", exc)
+            logger.warning("No Plex server available for owner scanning")
+        else:
+            logger.info("Using configured Plex server for owner scanning: %s", plex_server.friendlyName)
         if plex_server:
             for section in plex_server.library.sections():
                 logger.debug("Processing section: %s (type: %s)", section.title, section.type)
@@ -460,32 +465,15 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
         
         logger.info("Found managed user: %s", managed_user.username or managed_user.title)
         
-        # Get owner's server connection (owner has permissions to access all user data)
-        plex_server = None
-        server_name = server_name or os.environ.get("PLEX_SERVER_NAME")
-        logger.debug("PLEX_SERVER_NAME environment variable: %s", server_name)
-        
-        if server_name:
-            try:
-                plex_server = account.resource(server_name).connect()
-                logger.debug("Successfully connected to server %s using owner credentials", server_name)
-            except Exception as exc:
-                logger.warning("Failed to connect to specific server %s: %s", server_name, exc)
-        
-        if not plex_server:
-            try:
-                resources = account.resources()
-                for resource in resources:
-                    if resource.provides and "server" in resource.provides:
-                        plex_server = resource.connect()
-                        logger.info("Using first available server: %s", plex_server.friendlyName)
-                        break
-            except Exception as exc:
-                logger.warning("Failed to connect to any server: %s", exc)
+        # Get owner's server connection using configured baseurl (owner has permissions to access all user data)
+        from app import get_plex_server
+        plex_server = get_plex_server()
         
         if not plex_server:
             logger.error("No Plex server available for owner account")
             return movies, episodes
+        
+        logger.info("Using configured Plex server for managed user %s: %s", user_id, plex_server.friendlyName)
         
         # Method 1: Get global history filtered by accountID (most reliable)
         try:

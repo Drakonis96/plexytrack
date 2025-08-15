@@ -202,16 +202,6 @@ def find_item_by_guid(plex, guid):
             except Exception:
                 continue
 
-    # Fallback to Discover search using the Plex account
-    try:  # pragma: no cover - network/account errors are non-critical
-        account = plex.myPlexAccount()
-        query = guid.split('://', 1)[1].split('?', 1)[0]
-        results = account.searchDiscover(query, limit=1)
-        if results:
-            return results[0]
-    except Exception:
-        pass
-
     return None
 
 
