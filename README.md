@@ -41,6 +41,8 @@ The application expects the following API credentials:
 - `PLEX_BASEURL` – URL of your Plex server, e.g. `http://localhost:32400`.
 - `PLEX_TOKEN` – your Plex authentication token.
 
+During synchronization the application first uses the credentials entered via the web interface and the token generated from that login. The direct server connection is made using the IP specified in `PLEX_BASEURL`. The legacy `PLEX_TOKEN`/`PLEX_BASEURL` method is only attempted if no session credentials are available.
+
 ### Optional enviroment variables
 You can automatically set upt these directly on the web interface by logging in to your Plex account. So you do not need to provide them on .env or compose files.
 

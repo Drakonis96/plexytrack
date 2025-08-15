@@ -343,57 +343,40 @@ def get_plex_server():
         password = None
         token = None
         baseurl = None
-        
+
         if has_request_context():
             email = session.get('plex_email')
             password = session.get('plex_password')
             token = session.get('plex_token')
+            baseurl = session.get('plex_baseurl')
         
         # If not in request context or session empty, check global session credentials
         if not token and (not email or not password):
             email, password, _, token, baseurl = get_session_credentials()
         
+        # Always honor the configured base URL if not set in session
+        if not baseurl:
+            baseurl = os.environ.get("PLEX_BASEURL")
+
         # Fall back to environment variables if session data not available
         if not token:
             if not email or not password:
                 email = os.environ.get("PLEX_EMAIL")
                 password = os.environ.get("PLEX_PASSWORD")
-            if not baseurl:
-                baseurl = os.environ.get("PLEX_BASEURL")
-                env_token = os.environ.get("PLEX_TOKEN")
-                if env_token and baseurl:
-                    token = env_token
+            env_token = os.environ.get("PLEX_TOKEN")
+            if env_token and baseurl:
+                token = env_token
 
         # Try token-based authentication first (avoids 2FA re-authentication)
         if token:
             try:
-                if baseurl:
-                    # Direct server connection with token
-                    from plexapi.server import PlexServer
-                    plex = PlexServer(baseurl, token)
-                    logger.info("Successfully connected to Plex using token (direct)")
-                else:
-                    # Use token to create account, then get server
-                    plex_account = MyPlexAccount(token=token)
-                    logger.info("Successfully authenticated with Plex using token")
-                    
-                    # Get the server
-                    server_name = os.environ.get("PLEX_SERVER_NAME")
-                    if server_name:
-                        resource = plex_account.resource(server_name)
-                        plex = resource.connect()
-                        logger.info("Connected to Plex server: %s", server_name)
-                    else:
-                        resources = plex_account.resources()
-                        plex_resources = [r for r in resources if r.product == 'Plex Media Server']
-                        if not plex_resources:
-                            logger.error("No Plex Media Server found in account")
-                            return None
-                        plex = plex_resources[0].connect()
-                        logger.info("Connected to Plex server: %s", plex_resources[0].name)
-                        
+                if not baseurl:
+                    raise ValueError("PLEX_BASEURL is required when using token authentication")
+                from plexapi.server import PlexServer
+                plex = PlexServer(baseurl, token)
+                plex_account = MyPlexAccount(token=token)
+                logger.info("Successfully connected to Plex using token and configured base URL")
                 return plex
-                        
             except Exception as exc:
                 logger.warning("Token-based authentication failed: %s", exc)
                 # Continue to email/password authentication
@@ -440,22 +423,25 @@ def get_plex_server():
                 
                 logger.info("2FA active: %s", plex_account.twoFactorEnabled)
                 
-                # Obtener el servidor de Plex
-                server_name = os.environ.get("PLEX_SERVER_NAME")
-                if server_name:
-                    # Usar servidor específico
-                    resource = plex_account.resource(server_name)
-                    plex = resource.connect()
-                    logger.info("Connected to Plex server: %s", server_name)
+                # Connect to the Plex server using the configured base URL
+                if baseurl:
+                    from plexapi.server import PlexServer
+                    plex = PlexServer(baseurl, plex_account.authenticationToken)
+                    logger.info("Connected to Plex server using configured base URL")
                 else:
-                    # Usar el primer servidor disponible
-                    resources = plex_account.resources()
-                    plex_resources = [r for r in resources if r.product == 'Plex Media Server']
-                    if not plex_resources:
-                        logger.error("No Plex Media Server found in account")
-                        return None
-                    plex = plex_resources[0].connect()
-                    logger.info("Connected to Plex server: %s", plex_resources[0].name)
+                    server_name = os.environ.get("PLEX_SERVER_NAME")
+                    if server_name:
+                        resource = plex_account.resource(server_name)
+                        plex = resource.connect()
+                        logger.info("Connected to Plex server: %s", server_name)
+                    else:
+                        resources = plex_account.resources()
+                        plex_resources = [r for r in resources if r.product == 'Plex Media Server']
+                        if not plex_resources:
+                            logger.error("No Plex Media Server found in account")
+                            return None
+                        plex = plex_resources[0].connect()
+                        logger.info("Connected to Plex server: %s", plex_resources[0].name)
                     
             except Exception as exc:  # noqa: BLE001
                 logger.error("Failed to connect to Plex using credentials: %s", exc)
@@ -3061,13 +3047,16 @@ def api_auth_plex():
         session['plex_email'] = email
         session['plex_password'] = password
         session['plex_token'] = account.authToken  # Store the authentication token
+        baseurl = os.environ.get("PLEX_BASEURL")
+        if baseurl:
+            session['plex_baseurl'] = baseurl
         if code:
             session['plex_2fa_code'] = code
         session['plex_account_id'] = account.id
         session['plex_username'] = account.username
-        
+
         # Also save credentials for scheduler access (including token to avoid 2FA re-auth)
-        save_session_credentials(email, password, code, account.authToken)
+        save_session_credentials(email, password, code, account.authToken, baseurl)
         
         # Reset global Plex variables to force re-authentication with new credentials
         global plex, plex_account
