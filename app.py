@@ -167,11 +167,8 @@ COLLECTION_SYNC_DIRECTION = DIRECTION_BOTH
 
 # Global storage for session-based Plex credentials (for scheduler access)
 session_plex_credentials = {
-    'email': None,
-    'password': None,
-    'code': None,
-    'token': None,  # Store the authentication token
-    'baseurl': None  # Store the server baseurl if available
+    'token': None,    # Authentication token obtained via web login
+    'baseurl': None   # Normalized server base URL
 }
 
 # Event used to cancel an ongoing sync
@@ -316,12 +313,22 @@ def get_simkl_redirect_uri() -> str:
     return "http://localhost:5030/oauth/simkl"
 
 
+def normalize_baseurl(url: Optional[str]) -> Optional[str]:
+    """Ensure the Plex base URL includes a scheme and no trailing slash."""
+    if not url:
+        return None
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "http://" + url
+    return url.rstrip("/")
+
+
 def get_plex_server_legacy():
     """
     Legacy fallback method using token authentication.
     Used when credentials are not provided.
     """
-    baseurl = os.environ.get("PLEX_BASEURL")
+    baseurl = normalize_baseurl(os.environ.get("PLEX_BASEURL"))
     token = os.environ.get("PLEX_TOKEN")
     if not baseurl or not token:
         return None
@@ -337,154 +344,40 @@ def get_plex_server():
     """Return a connected :class:`PlexServer` instance or ``None``."""
     global plex, plex_account
     if plex is None:
-        # Check session first, then fall back to environment variables
         from flask import has_request_context, session
-        email = None
-        password = None
         token = None
         baseurl = None
-        
-        if has_request_context():
-            email = session.get('plex_email')
-            password = session.get('plex_password')
-            token = session.get('plex_token')
-        
-        # If not in request context or session empty, check global session credentials
-        if not token and (not email or not password):
-            email, password, _, token, baseurl = get_session_credentials()
-        
-        # Fall back to environment variables if session data not available
-        if not token:
-            if not email or not password:
-                email = os.environ.get("PLEX_EMAIL")
-                password = os.environ.get("PLEX_PASSWORD")
-            if not baseurl:
-                baseurl = os.environ.get("PLEX_BASEURL")
-                env_token = os.environ.get("PLEX_TOKEN")
-                if env_token and baseurl:
-                    token = env_token
 
-        # Try token-based authentication first (avoids 2FA re-authentication)
-        if token:
+        if has_request_context():
+            token = session.get('plex_token')
+            baseurl = session.get('plex_baseurl')
+
+        if not token or not baseurl:
+            stored_token, stored_baseurl = get_session_credentials()
+            token = token or stored_token
+            baseurl = baseurl or stored_baseurl
+
+        if not baseurl:
+            baseurl = os.environ.get("PLEX_BASEURL")
+        baseurl = normalize_baseurl(baseurl)
+
+        if not token:
+            token = os.environ.get("PLEX_TOKEN")
+
+        if token and baseurl:
             try:
-                if baseurl:
-                    # Direct server connection with token
-                    from plexapi.server import PlexServer
-                    plex = PlexServer(baseurl, token)
-                    logger.info("Successfully connected to Plex using token (direct)")
-                else:
-                    # Use token to create account, then get server
-                    plex_account = MyPlexAccount(token=token)
-                    logger.info("Successfully authenticated with Plex using token")
-                    
-                    # Get the server
-                    server_name = os.environ.get("PLEX_SERVER_NAME")
-                    if server_name:
-                        resource = plex_account.resource(server_name)
-                        plex = resource.connect()
-                        logger.info("Connected to Plex server: %s", server_name)
-                    else:
-                        resources = plex_account.resources()
-                        plex_resources = [r for r in resources if r.product == 'Plex Media Server']
-                        if not plex_resources:
-                            logger.error("No Plex Media Server found in account")
-                            return None
-                        plex = plex_resources[0].connect()
-                        logger.info("Connected to Plex server: %s", plex_resources[0].name)
-                        
+                from plexapi.server import PlexServer
+                plex = PlexServer(baseurl, token)
+                plex_account = MyPlexAccount(token=token)
+                logger.info("Successfully connected to Plex using token and configured base URL")
                 return plex
-                        
             except Exception as exc:
                 logger.warning("Token-based authentication failed: %s", exc)
-                # Continue to email/password authentication
-                
-        # Fallback to email/password authentication
-        if email and password:
-            try:
-                # Intentar login básico primero
-                try:
-                    plex_account = MyPlexAccount(email, password)
-                    logger.info("Successfully authenticated with Plex (no 2FA required)")
-                except Exception as first_exc:
-                    # Si falla, verificar si necesita 2FA
-                    error_str = str(first_exc).lower()
-                    logger.info("Plex authentication error: %s", error_str)
-                    
-                    # Various ways to detect 2FA requirement
-                    requires_2fa = any([
-                        "two-factor" in error_str,
-                        "2fa" in error_str,
-                        "verification code" in error_str,
-                        "code=\"1029\"" in error_str,
-                        "1029" in error_str and ("verification" in error_str or "unauthorized" in error_str),
-                        ("unauthorized" in error_str and "verification" in error_str),
-                        "please enter the verification" in error_str,
-                        "enter the verification code" in error_str
-                    ])
-                    
-                    if requires_2fa:
-                        logger.info("2FA required for Plex authentication")
-                        from flask import redirect, url_for, has_request_context
-                        if has_request_context():
-                            # Just return None and let the caller handle it
-                            return None
-                        otp = os.environ.get("PLEX_2FA_CODE")
-                        if not otp:
-                            logger.error("2FA required but PLEX_2FA_CODE not provided")
-                            return None
-                        plex_account = MyPlexAccount(email, password, code=otp)
-                        logger.info("Successfully authenticated with Plex using 2FA")
-                    else:
-                        # Si no es un error de 2FA, re-lanzar la excepción
-                        raise first_exc
-                
-                logger.info("2FA active: %s", plex_account.twoFactorEnabled)
-                
-                # Obtener el servidor de Plex
-                server_name = os.environ.get("PLEX_SERVER_NAME")
-                if server_name:
-                    # Usar servidor específico
-                    resource = plex_account.resource(server_name)
-                    plex = resource.connect()
-                    logger.info("Connected to Plex server: %s", server_name)
-                else:
-                    # Usar el primer servidor disponible
-                    resources = plex_account.resources()
-                    plex_resources = [r for r in resources if r.product == 'Plex Media Server']
-                    if not plex_resources:
-                        logger.error("No Plex Media Server found in account")
-                        return None
-                    plex = plex_resources[0].connect()
-                    logger.info("Connected to Plex server: %s", plex_resources[0].name)
-                    
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to connect to Plex using credentials: %s", exc)
-                from flask import redirect, url_for, has_request_context
-                error_str = str(exc).lower()
-                
-                # Various ways to detect 2FA requirement
-                requires_2fa = any([
-                    "two-factor" in error_str,
-                    "2fa" in error_str,
-                    "verification code" in error_str,
-                    "code=\"1029\"" in error_str,
-                    "1029" in error_str and ("verification" in error_str or "unauthorized" in error_str),
-                    ("unauthorized" in error_str and "verification" in error_str),
-                    "please enter the verification" in error_str,
-                    "enter the verification code" in error_str
-                ])
-                
-                if has_request_context() and requires_2fa:
-                    # Just return None and let the page handle 2FA
-                    return None
-                plex = None
-                plex_account = None
-        else:
-            # Fallback: método legacy con token
-            logger.warning("No Plex authentication credentials available")
-            plex = get_plex_server_legacy()
-            plex_account = None  # No account available with token method
-            
+
+        # Last resort: método legacy con token
+        plex = get_plex_server_legacy()
+        plex_account = None
+
     return plex
 
 
@@ -3061,13 +2954,16 @@ def api_auth_plex():
         session['plex_email'] = email
         session['plex_password'] = password
         session['plex_token'] = account.authToken  # Store the authentication token
+        baseurl = normalize_baseurl(os.environ.get("PLEX_BASEURL"))
+        if baseurl:
+            session['plex_baseurl'] = baseurl
         if code:
             session['plex_2fa_code'] = code
         session['plex_account_id'] = account.id
         session['plex_username'] = account.username
-        
-        # Also save credentials for scheduler access (including token to avoid 2FA re-auth)
-        save_session_credentials(email, password, code, account.authToken)
+
+        # Also save token and base URL for scheduler access
+        save_session_credentials(account.authToken, baseurl)
         
         # Reset global Plex variables to force re-authentication with new credentials
         global plex, plex_account
@@ -3376,34 +3272,28 @@ def logout():
 # --------------------------------------------------------------------------- #
 def test_connections() -> bool:
     global plex
-    # Check session first, then fall back to environment variables
+    # Check session first, then fall back to stored credentials and environment variables
     from flask import has_request_context, session
-    
-    plex_email = None
-    plex_password = None
+
     plex_token = None
-    
+    plex_baseurl = None
+
     if has_request_context():
-        plex_email = session.get('plex_email')
-        plex_password = session.get('plex_password')
         plex_token = session.get('plex_token')
-    
-    # If not in request context or session empty, check global session credentials
-    if not plex_token and (not plex_email or not plex_password):
-        plex_email, plex_password, _, plex_token, _ = get_session_credentials()
-    
-    # Fall back to environment variables if session data not available
-    if not plex_token and (not plex_email or not plex_password):
-        plex_email = os.environ.get("PLEX_EMAIL")
-        plex_password = os.environ.get("PLEX_PASSWORD")
-    
-    plex_baseurl = os.environ.get("PLEX_BASEURL")
-    plex_env_token = os.environ.get("PLEX_TOKEN")
-    
-    # Use environment token only if no session token is available
-    if not plex_token and plex_env_token:
-        plex_token = plex_env_token
-    
+        plex_baseurl = session.get('plex_baseurl')
+
+    if not plex_token or not plex_baseurl:
+        stored_token, stored_baseurl = get_session_credentials()
+        plex_token = plex_token or stored_token
+        plex_baseurl = plex_baseurl or stored_baseurl
+
+    if not plex_token:
+        plex_token = os.environ.get("PLEX_TOKEN")
+    if not plex_baseurl:
+        plex_baseurl = os.environ.get("PLEX_BASEURL")
+
+    plex_baseurl = normalize_baseurl(plex_baseurl)
+
     trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
     trakt_client_id = os.environ.get("TRAKT_CLIENT_ID")
     trakt_enabled = SYNC_PROVIDER == "trakt" and bool(trakt_token and trakt_client_id)
@@ -3411,13 +3301,9 @@ def test_connections() -> bool:
     simkl_client_id = os.environ.get("SIMKL_CLIENT_ID")
     simkl_enabled = SYNC_PROVIDER == "simkl" and bool(simkl_token and simkl_client_id)
 
-    # Check if we have any form of authentication
-    has_token = bool(plex_token)
-    has_credentials = bool(plex_email and plex_password)
-    has_legacy = bool(plex_baseurl and plex_token)
-    
-    if not has_token and not has_credentials and not has_legacy:
-        logger.error("Missing Plex authentication. Provide either session credentials, PLEX_EMAIL/PLEX_PASSWORD or PLEX_BASEURL/PLEX_TOKEN.")
+    # Require token and base URL for Plex connection
+    if not plex_token or not plex_baseurl:
+        logger.error("Missing Plex authentication. Provide a token via the web interface or PLEX_TOKEN along with PLEX_BASEURL.")
         return False
     if not trakt_enabled and not simkl_enabled:
         logger.error("Missing environment variables for selected provider.")
@@ -3890,23 +3776,17 @@ def get_selected_user_api():
 # --------------------------------------------------------------------------- #
 # SESSION CREDENTIALS MANAGEMENT
 # --------------------------------------------------------------------------- #
-def save_session_credentials(email, password, code=None, token=None, baseurl=None):
-    """Save Plex credentials from session for scheduler access."""
+def save_session_credentials(token=None, baseurl=None):
+    """Save Plex token and base URL for scheduler access."""
     global session_plex_credentials
-    session_plex_credentials['email'] = email
-    session_plex_credentials['password'] = password
-    session_plex_credentials['code'] = code
     session_plex_credentials['token'] = token
-    session_plex_credentials['baseurl'] = baseurl
+    session_plex_credentials['baseurl'] = normalize_baseurl(baseurl)
     logger.info("Session credentials saved for scheduler access")
 
 def get_session_credentials():
-    """Get Plex credentials from session storage."""
+    """Get Plex token and base URL from session storage."""
     global session_plex_credentials
     return (
-        session_plex_credentials.get('email'),
-        session_plex_credentials.get('password'),
-        session_plex_credentials.get('code'),
         session_plex_credentials.get('token'),
         session_plex_credentials.get('baseurl')
     )
@@ -3914,7 +3794,7 @@ def get_session_credentials():
 def clear_session_credentials():
     """Clear stored session credentials."""
     global session_plex_credentials
-    session_plex_credentials = {'email': None, 'password': None, 'code': None, 'token': None, 'baseurl': None}
+    session_plex_credentials = {'token': None, 'baseurl': None}
     logger.info("Session credentials cleared")
 
 
