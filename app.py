@@ -36,6 +36,12 @@ from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
 from getpass import getpass
 
+# Plex moved watchlist and other account endpoints from the old
+# ``metadata.provider.plex.tv`` domain to ``discover.provider.plex.tv``.
+# Override the PlexAPI constant so all watchlist operations use the
+# updated base URL.
+MyPlexAccount.METADATA = MyPlexAccount.DISCOVER
+
 from utils import (
     to_iso_z,
     normalize_year,
