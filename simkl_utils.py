@@ -19,7 +19,7 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.2"
+APP_VERSION = "v0.4.3"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
