@@ -7,6 +7,13 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import requests
 
+from plexapi.myplex import MyPlexAccount
+
+# Plex switched watchlist-related endpoints to the Discover domain.
+# Ensure PlexAPI uses the new base URL when this module is imported
+# independently of ``app.py``.
+MyPlexAccount.METADATA = MyPlexAccount.DISCOVER
+
 from utils import (
     guid_to_ids,
     normalize_year,
