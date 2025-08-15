@@ -16,7 +16,7 @@ body {
     width: 100%;
     margin: 0;
     background-color: #ffffff;
-    border-radius: 12px;
+    border-radius: 0 12px 12px 0; /* Only round right side */
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
     overflow: hidden;
 }
@@ -130,6 +130,7 @@ body {
 
     .app-container {
         width: 100%;
+        border-radius: 12px; /* Restore full border radius on mobile */
     }
 
     .nav-toggle {
