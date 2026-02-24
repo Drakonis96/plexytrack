@@ -127,7 +127,7 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.6"
+APP_VERSION = "v0.4.7"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -3110,6 +3110,16 @@ def config_page():
         trakt_configured=trakt_configured,
         simkl_configured=simkl_configured,
         provider=SYNC_PROVIDER,
+    )
+
+
+@app.route("/settings")
+@login_required
+def settings_page():
+    """Display settings page with security and redirect URI management."""
+    load_settings()
+    return render_template(
+        "settings.html",
         trakt_redirect_uri=get_trakt_redirect_uri(),
         simkl_redirect_uri=get_simkl_redirect_uri(),
     )

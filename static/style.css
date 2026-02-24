@@ -1168,6 +1168,7 @@ select.direction-select {
 /* ---------- Login Page ---------- */
 .login-wrapper {
   min-height: 100vh;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1177,11 +1178,11 @@ select.direction-select {
 
 .login-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 40px 32px 28px;
+  padding: 40px 32px 32px;
   box-shadow: var(--shadow-lg);
 }
 
@@ -1191,8 +1192,8 @@ select.direction-select {
 }
 
 .login-logo {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: var(--radius-md);
   margin: 0 auto 16px;
 }
@@ -1344,7 +1345,7 @@ select.direction-select {
   flex-wrap: wrap;
 }
 .redirect-active-info code {
-  background: var(--bg-secondary);
+  background: var(--bg-badge);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: .85rem;
@@ -1364,12 +1365,12 @@ select.direction-select {
   gap: .75rem;
   padding: .5rem .75rem;
   border-radius: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  background: var(--bg-badge);
+  border: 1px solid var(--border-color);
 }
 .redirect-uri-item.active {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-badge));
 }
 .redirect-uri-text {
   display: flex;
