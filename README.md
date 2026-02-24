@@ -24,6 +24,7 @@ The recommended sync interval is **at least 60 minutes**. Shorter intervals gene
 - [Live sync](#live-sync)
 - [Getting a Plex token](#getting-a-plex-token)
 - [Getting Trakt API credentials](#getting-trakt-api-credentials)
+- [Running on Unraid](#running-on-unraid)
 - [Running with Docker Compose](#running-with-docker-compose)
 - [Screenshots](#screenshots)
 
@@ -165,6 +166,44 @@ Simkl's own `sync/plex/webhook` endpoint for instant updates.
 3. After saving the app you will see a **Client ID** and **Client Secret**. Keep them handy.
 4. Open PlexyTrack and from the **Config.** tab choose **Configure** under Simkl to authorize the app.
 
+
+## Running on Unraid
+
+PlexyTrack is available as a Community Applications template for Unraid.
+
+### Installing from Community Applications
+
+1. Open the **Apps** tab in Unraid and search for **PlexyTrack**.
+2. Click **Install** to open the template configuration screen.
+
+### Template fields
+
+The template exposes the following fields. Fill them in directly from the Unraid UI:
+
+| Field | Container Variable | Where to get it | Required |
+|---|---|---|---|
+| **Web UI Port** | `5030` (TCP) | Default is `5030`. Change only if the port conflicts with another container. | Yes |
+| **Config Directory** | `/config` → `/mnt/user/appdata/plexytrack/config` | Stores OAuth tokens and `settings.json`. Keep the default path or choose your own appdata location. | Yes |
+| **State Directory** | `/state` → `/mnt/user/appdata/plexytrack/state` | Stores sync state files. Keep the default path or choose your own appdata location. | Yes |
+| **Plex Server URL** | `PLEX_BASEURL` | The URL of your Plex server, e.g. `http://192.168.1.100:32400`. Use your server's LAN IP. | Yes |
+| **Plex Token** | `PLEX_TOKEN` | Your Plex authentication token. See [Getting a Plex token](#getting-a-plex-token). | Yes |
+| **Trakt Client ID** | `TRAKT_CLIENT_ID` | From your Trakt API application at <https://trakt.tv/oauth/applications>. See [Getting Trakt API credentials](#getting-trakt-api-credentials). | Only if using Trakt |
+| **Trakt Client Secret** | `TRAKT_CLIENT_SECRET` | Same Trakt application page — shown after saving the app. | Only if using Trakt |
+| **Simkl Client ID** | `SIMKL_CLIENT_ID` | From your Simkl application at <https://simkl.com/apps>. See [Getting Simkl API credentials](#getting-simkl-api-credentials). | Only if using Simkl |
+| **Simkl Client Secret** | `SIMKL_CLIENT_SECRET` | Same Simkl application page. | Only if using Simkl |
+| **Timezone** | `TZ` | Your timezone, e.g. `America/New_York` or `Europe/London`. Defaults to `Europe/Madrid`. | No |
+
+> **Tip:** The **Trakt Redirect URI** and **Simkl Redirect URI** fields are hidden under **Advanced View** in the template. Leave them empty unless you need to override the auto-detected value (for example when accessing PlexyTrack through a reverse proxy).
+
+### After installing
+
+1. Click **Apply** to create and start the container.
+2. Open the Web UI at `http://<your-unraid-ip>:5030`.
+3. Go to the **Config.** tab and click **Configure** next to Trakt or Simkl to authorize PlexyTrack. Follow the on-screen OAuth flow — no access tokens need to be pasted manually.
+4. Select the Plex user you want to sync from the **Users** tab.
+5. Back on the main page, set your desired sync interval and click **Schedule Sync**.
+
+All OAuth tokens and settings are persisted in the **Config Directory** (`/mnt/user/appdata/plexytrack/config`) and sync state in the **State Directory** (`/mnt/user/appdata/plexytrack/state`), so your configuration survives container updates and restarts.
 
 ## Running with Docker Compose
 
