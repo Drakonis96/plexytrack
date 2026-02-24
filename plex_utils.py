@@ -324,6 +324,13 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
 
     # Escanear elementos marcados manualmente como vistos (viewCount > 0)
     logger.info("Scanning for manually marked watched items for owner...")
+    # Convert mindate string to datetime for PlexAPI history() calls
+    scan_mindate_dt = None
+    if mindate:
+        try:
+            scan_mindate_dt = datetime.fromisoformat(mindate.replace("Z", "+00:00"))
+        except (TypeError, ValueError) as conv_exc:
+            logger.warning("Could not parse mindate %r for library scan: %s", mindate, conv_exc)
     try:
         # Use the configured Plex server instead of auto-discovery
         from app import get_plex_server
@@ -350,7 +357,7 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                 user_history_for_movie = list(
                                     plex_server.history(
                                         ratingKey=movie.ratingKey,
-                                        mindate=mindate,
+                                        mindate=scan_mindate_dt,
                                         maxresults=1,
                                         accountID=account.id,
                                     )
@@ -360,8 +367,8 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
                                 else:
                                     # Manually marked as watched but no history entry
-                                    # Use dateAdded or updatedAt as fallback timestamp
-                                    fallback_date = getattr(movie, 'updatedAt', None) or getattr(movie, 'addedAt', None)
+                                    # Use lastViewedAt first (set by markPlayed), then updatedAt/addedAt as fallback
+                                    fallback_date = getattr(movie, 'lastViewedAt', None) or getattr(movie, 'updatedAt', None) or getattr(movie, 'addedAt', None)
                                     watched_at = to_iso_z(fallback_date)
 
                                 if mindate and not safe_timestamp_compare(watched_at, mindate):
@@ -396,7 +403,7 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                 user_history_for_ep = list(
                                     plex_server.history(
                                         ratingKey=episode.ratingKey,
-                                        mindate=mindate,
+                                        mindate=scan_mindate_dt,
                                         maxresults=1,
                                         accountID=account.id,
                                     )
@@ -406,8 +413,8 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                     watched_at = to_iso_z(getattr(last_viewed, "viewedAt", None))
                                 else:
                                     # Manually marked as watched but no history entry
-                                    # Use dateAdded or updatedAt as fallback timestamp
-                                    fallback_date = getattr(episode, 'updatedAt', None) or getattr(episode, 'addedAt', None)
+                                    # Use lastViewedAt first (set by markPlayed), then updatedAt/addedAt as fallback
+                                    fallback_date = getattr(episode, 'lastViewedAt', None) or getattr(episode, 'updatedAt', None) or getattr(episode, 'addedAt', None)
                                     watched_at = to_iso_z(fallback_date)
 
                                 if mindate and not safe_timestamp_compare(watched_at, mindate):
@@ -487,12 +494,20 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
         
         logger.info("Using configured Plex server for managed user %s: %s", user_id, plex_server.friendlyName)
         
+        # Convert mindate string to datetime for PlexAPI history() calls
+        managed_mindate_dt = None
+        if mindate:
+            try:
+                managed_mindate_dt = datetime.fromisoformat(mindate.replace("Z", "+00:00"))
+            except (TypeError, ValueError) as conv_exc:
+                logger.warning("Could not parse mindate %r for managed user scan: %s", mindate, conv_exc)
+        
         # Method 1: Get global history filtered by accountID (most reliable)
         try:
             logger.debug("Fetching global history filtered by accountID %s", user_id)
             # Use owner's server to get history filtered by managed user's accountID
             history_items = plex_server.history(
-                accountID=user_id, mindate=mindate, maxresults=None
+                accountID=user_id, mindate=managed_mindate_dt, maxresults=None
             )
             
             for entry in history_items:
@@ -582,7 +597,7 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
                                     plex_server.history(
                                         ratingKey=movie.ratingKey,
                                         accountID=user_id,
-                                        mindate=mindate,
+                                        mindate=managed_mindate_dt,
                                         maxresults=1,
                                     )
                                 )
@@ -644,7 +659,7 @@ def get_managed_user_plex_history(account, user_id, server_name=None, mindate: O
                                     plex_server.history(
                                         ratingKey=episode.ratingKey,
                                         accountID=user_id,
-                                        mindate=mindate,
+                                        mindate=managed_mindate_dt,
                                         maxresults=1,
                                     )
                                 )

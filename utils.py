@@ -150,19 +150,35 @@ def imdb_guid(item) -> Optional[str]:
 
 
 def get_show_from_library(plex, title):
-    """Return a show object from any library section."""
+    """Return a show object from any library section.
+
+    Plex's ``section.get(title)`` performs a **substring** match and returns the
+    first hit (e.g. searching for "Evil" can return "Ash vs. Evil Dead").  This
+    helper prefers an *exact* title match so that episode GUIDs are attributed
+    to the correct show.
+    """
     for sec in plex.library.sections():
         if sec.type == "show":
+            # 1. Try sec.get() – fast but substring-matched
             try:
-                return sec.get(title)
+                result = sec.get(title)
+                if result and result.title.lower() == title.lower():
+                    return result
             except NotFound:
-                try:
-                    results = sec.search(title=title)
-                    if results:
-                        return results[0]
-                except Exception:
-                    pass
-                continue
+                pass
+
+            # 2. Broader search – pick the exact match if available
+            try:
+                results = sec.search(title=title)
+                # Prefer exact title match
+                for r in results:
+                    if r.title.lower() == title.lower():
+                        return r
+                # Fall back to first result if no exact match
+                if results:
+                    return results[0]
+            except Exception:
+                pass
     return None
 
 

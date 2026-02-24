@@ -46,5 +46,11 @@ plex_sync_state.json
 # Backups of old UI files
 *.bak
 
+# Development / test data (personal)
+phase*.json
+real_tri_sync_battery.py
+test_real_sync.py
+test_timestamp_fix.py
+
 # Docker
 docker-compose.override.yml

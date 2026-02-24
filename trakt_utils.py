@@ -24,6 +24,7 @@ from utils import (
     get_show_from_library,
     ensure_collection,
     find_item_by_guid,
+    safe_timestamp_compare,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,14 @@ def load_watchlist_state() -> dict:
         logger.debug("No existing watchlist state file found at %s", WATCHLIST_STATE_FILE)
     return {
         "plex": {"guids": [], "types": {}, "meta": {}, "last_sync": None},
-        "trakt": {"movies": [], "shows": [], "last_activity": None, "last_sync": None},
+        "trakt": {
+            "movies": [],
+            "shows": [],
+            "types": {},
+            "listed_at": {},
+            "last_activity": None,
+            "last_sync": None,
+        },
     }
 
 
@@ -798,22 +806,38 @@ def sync_watchlist(
         return
         
     current_trakt_guids = set()
+    current_trakt_types = {}
+    current_trakt_listed_at = {}
     for it in trakt_movies:
         ids = it.get("movie", {}).get("ids", {})
+        guid = None
         if ids.get("imdb"):
-            current_trakt_guids.add(f"imdb://{ids['imdb']}")
+            guid = f"imdb://{ids['imdb']}"
         elif ids.get("tmdb"):
-            current_trakt_guids.add(f"tmdb://{ids['tmdb']}")
+            guid = f"tmdb://{ids['tmdb']}"
         elif ids.get("tvdb"):
-            current_trakt_guids.add(f"tvdb://{ids['tvdb']}")
+            guid = f"tvdb://{ids['tvdb']}"
+        if guid:
+            current_trakt_guids.add(guid)
+            current_trakt_types[guid] = "movie"
+            listed_at = it.get("listed_at")
+            if listed_at:
+                current_trakt_listed_at[guid] = listed_at
     for it in trakt_shows:
         ids = it.get("show", {}).get("ids", {})
+        guid = None
         if ids.get("imdb"):
-            current_trakt_guids.add(f"imdb://{ids['imdb']}")
+            guid = f"imdb://{ids['imdb']}"
         elif ids.get("tmdb"):
-            current_trakt_guids.add(f"tmdb://{ids['tmdb']}")
+            guid = f"tmdb://{ids['tmdb']}"
         elif ids.get("tvdb"):
-            current_trakt_guids.add(f"tvdb://{ids['tvdb']}")
+            guid = f"tvdb://{ids['tvdb']}"
+        if guid:
+            current_trakt_guids.add(guid)
+            current_trakt_types[guid] = "show"
+            listed_at = it.get("listed_at")
+            if listed_at:
+                current_trakt_listed_at[guid] = listed_at
 
     # Fetch current Plex watchlist
     try:
@@ -832,7 +856,9 @@ def sync_watchlist(
             current_plex_types[g] = item.TYPE
 
     # Get previous state
-    previous_trakt_guids = set(state.get("trakt", {}).get("movies", []) + state.get("trakt", {}).get("shows", []))
+    previous_trakt = state.get("trakt", {})
+    previous_trakt_guids = set(previous_trakt.get("movies", []) + previous_trakt.get("shows", []))
+    previous_trakt_listed_at = previous_trakt.get("listed_at", {}) or {}
     previous_plex_guids = set(state.get("plex", {}).get("guids", []))
     previous_plex_types = state.get("plex", {}).get("types", {})
     
@@ -856,17 +882,59 @@ def sync_watchlist(
         trakt_removed = set()
     elif WATCHLIST_CONFLICT_RESOLUTION == "last_wins":
         logger.info("Using last-action-wins mode: changes will be applied bidirectionally")
+
+    # Effective addition sets include normal additions plus stale-state reconciliation.
+    plex_add_effective = set(plex_added)
+    trakt_add_effective = set(trakt_added)
+
+    # If a Trakt item appears again with a newer listed_at, treat it as a re-add.
+    # This avoids false removals when state says it existed before but user removed
+    # and re-added it on Trakt between sync runs.
+    trakt_readded = set()
+    for guid in current_trakt_guids & previous_trakt_guids:
+        prev_listed = previous_trakt_listed_at.get(guid)
+        cur_listed = current_trakt_listed_at.get(guid)
+        if safe_timestamp_compare(cur_listed, prev_listed):
+            trakt_readded.add(guid)
+    if trakt_readded:
+        logger.info("Detected %d Trakt re-added watchlist items", len(trakt_readded))
+        trakt_add_effective.update(trakt_readded)
+        # Re-add should win over a stale inferred Plex removal for the same guid.
+        plex_removed -= trakt_readded
+
+    # Reconcile state drift: if platforms differ but no explicit add/remove was
+    # recorded for a guid, sync the missing side in a non-destructive way.
+    trakt_only = current_trakt_guids - current_plex_guids
+    plex_only = current_plex_guids - current_trakt_guids
+    stale_trakt_only = {
+        guid
+        for guid in trakt_only
+        if guid not in trakt_add_effective and guid not in plex_removed
+    }
+    stale_plex_only = {
+        guid
+        for guid in plex_only
+        if guid not in plex_add_effective and guid not in trakt_removed
+    }
+    if stale_trakt_only or stale_plex_only:
+        logger.warning(
+            "Watchlist state drift detected; reconciling %d Trakt-only and %d Plex-only items",
+            len(stale_trakt_only),
+            len(stale_plex_only),
+        )
+        trakt_add_effective.update(stale_trakt_only)
+        plex_add_effective.update(stale_plex_only)
     
     changes_made = False
 
     # Apply Plex changes to Trakt
     if direction in ("both", "plex_to_service"):
         # Add items that were added to Plex
-        if plex_added:
-            logger.info("Applying %d Plex additions to Trakt", len(plex_added))
+        if plex_add_effective:
+            logger.info("Applying %d Plex additions to Trakt", len(plex_add_effective))
             movies_to_add = []
             shows_to_add = []
-            for guid in plex_added:
+            for guid in plex_add_effective:
                 item_type = current_plex_types.get(guid)
                 if not item_type:
                     # Try to determine type from Plex item
@@ -929,11 +997,11 @@ def sync_watchlist(
     # Apply Trakt changes to Plex
     if direction in ("both", "service_to_plex"):
         # Add items that were added to Trakt
-        if trakt_added:
-            logger.info("Applying %d Trakt additions to Plex", len(trakt_added))
+        if trakt_add_effective:
+            logger.info("Applying %d Trakt additions to Plex", len(trakt_add_effective))
             add_to_plex = []
             items_not_found = []
-            for guid in trakt_added:
+            for guid in trakt_add_effective:
                 logger.debug("Looking for Trakt item %s in Plex library", guid)
                 item = find_item_by_guid(plex, guid)
                 if item:
@@ -996,32 +1064,49 @@ def sync_watchlist(
                 trakt_shows = trakt_request("GET", "/sync/watchlist/shows", headers).json()
                 current_trakt_movies = []
                 current_trakt_shows = []
+                current_trakt_types = {}
+                current_trakt_listed_at = {}
                 for it in trakt_movies:
                     ids = it.get("movie", {}).get("ids", {})
+                    guid = None
                     if ids.get("imdb"):
-                        current_trakt_movies.append(f"imdb://{ids['imdb']}")
+                        guid = f"imdb://{ids['imdb']}"
                     elif ids.get("tmdb"):
-                        current_trakt_movies.append(f"tmdb://{ids['tmdb']}")
+                        guid = f"tmdb://{ids['tmdb']}"
                     elif ids.get("tvdb"):
-                        current_trakt_movies.append(f"tvdb://{ids['tvdb']}")
+                        guid = f"tvdb://{ids['tvdb']}"
+                    if guid:
+                        current_trakt_movies.append(guid)
+                        current_trakt_types[guid] = "movie"
+                        listed_at = it.get("listed_at")
+                        if listed_at:
+                            current_trakt_listed_at[guid] = listed_at
                 for it in trakt_shows:
                     ids = it.get("show", {}).get("ids", {})
+                    guid = None
                     if ids.get("imdb"):
-                        current_trakt_shows.append(f"imdb://{ids['imdb']}")
+                        guid = f"imdb://{ids['imdb']}"
                     elif ids.get("tmdb"):
-                        current_trakt_shows.append(f"tmdb://{ids['tmdb']}")
+                        guid = f"tmdb://{ids['tmdb']}"
                     elif ids.get("tvdb"):
-                        current_trakt_shows.append(f"tvdb://{ids['tvdb']}")
+                        guid = f"tvdb://{ids['tvdb']}"
+                    if guid:
+                        current_trakt_shows.append(guid)
+                        current_trakt_types[guid] = "show"
+                        listed_at = it.get("listed_at")
+                        if listed_at:
+                            current_trakt_listed_at[guid] = listed_at
             except Exception as exc:
                 logger.warning("Failed to re-fetch watchlists after changes: %s", exc)
         else:
             # Use the data we already fetched
-            current_trakt_movies = [g for g in current_trakt_guids if previous_plex_types.get(g) == "movie"]
-            current_trakt_shows = [g for g in current_trakt_guids if previous_plex_types.get(g) == "show"]
-            # Fill in missing types
+            current_trakt_movies = [g for g in current_trakt_guids if current_trakt_types.get(g) == "movie"]
+            current_trakt_shows = [g for g in current_trakt_guids if current_trakt_types.get(g) == "show"]
+            # Fill in missing types (default movie for backward compatibility)
             for g in current_trakt_guids:
                 if g not in current_trakt_movies and g not in current_trakt_shows:
-                    current_trakt_movies.append(g)  # Default to movie if unknown
+                    current_trakt_movies.append(g)
+                    current_trakt_types[g] = "movie"
 
         # Get Plex watchlist metadata
         total_size = len(current_plex_guids)
@@ -1036,6 +1121,8 @@ def sync_watchlist(
         state["trakt"] = {
             "movies": current_trakt_movies,
             "shows": current_trakt_shows,
+            "types": current_trakt_types,
+            "listed_at": current_trakt_listed_at,
             "last_activity": current_time,
             "last_sync": current_time,
         }

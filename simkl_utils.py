@@ -23,6 +23,7 @@ APP_VERSION = "v0.4.5"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
+SIMKL_LIST_STATUSES = {"plantowatch", "watching", "completed", "hold", "dropped"}
 
 
 def load_auth() -> dict:
@@ -153,6 +154,117 @@ def simkl_search_ids(headers: dict, title: str, *, is_movie: bool = True, year: 
     return ids
 
 
+def add_items_to_simkl_list(
+    headers: dict,
+    *,
+    movies: Optional[List[dict]] = None,
+    shows: Optional[List[dict]] = None,
+    target_list: str = "plantowatch",
+) -> dict:
+    """Add movies/shows to a Simkl list via ``/sync/add-to-list``.
+
+    Args:
+        headers: Auth headers for Simkl.
+        movies: Optional list of movie objects (title/year/ids).
+        shows: Optional list of show objects (title/year/ids).
+        target_list: One of ``SIMKL_LIST_STATUSES``.
+    """
+    if target_list not in SIMKL_LIST_STATUSES:
+        raise ValueError(f"Invalid target list: {target_list}")
+
+    payload: Dict[str, list] = {}
+
+    if movies:
+        payload["movies"] = []
+        for m in movies:
+            item = dict(m)
+            item["to"] = target_list
+            payload["movies"].append(item)
+
+    if shows:
+        payload["shows"] = []
+        for s in shows:
+            item = dict(s)
+            item["to"] = target_list
+            payload["shows"].append(item)
+
+    if not payload:
+        return {}
+
+    resp = simkl_request("POST", "/sync/add-to-list", headers, json=payload)
+    if not resp.content:
+        return {}
+    return resp.json()
+
+
+def get_simkl_watchlist(headers: dict, media_type: str = "all") -> dict:
+    """Fetch Simkl watchlist/all-items data.
+
+    ``media_type`` can be ``all``, ``movies`` or ``shows``.
+    """
+    media_type = media_type.lower()
+    if media_type == "all":
+        endpoint = "/sync/all-items"
+    elif media_type in {"movies", "shows", "anime"}:
+        endpoint = f"/sync/all-items/{media_type}/"
+    else:
+        raise ValueError(f"Invalid media_type: {media_type}")
+
+    params = {"extended": "full", "episode_watched_at": "yes"}
+    resp = simkl_request("GET", endpoint, headers, params=params)
+    if not resp.content:
+        return {}
+    data = resp.json()
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        return {media_type: data}
+    return {}
+
+
+def sync_plex_watchlist_to_simkl(plex, headers: dict, target_list: str = "plantowatch") -> int:
+    """Mirror Plex watchlist items into a Simkl list.
+
+    Supports both ``PlexServer`` (via ``myPlexAccount().watchlist()``)
+    and mocked objects exposing ``watchlist()`` directly.
+    """
+    try:
+        watch_items = plex.watchlist()
+    except Exception:
+        account = plex.myPlexAccount()
+        watch_items = account.watchlist()
+
+    if not watch_items:
+        return 0
+
+    movies: List[dict] = []
+    shows: List[dict] = []
+
+    for item in watch_items:
+        guid = best_guid(item)
+        ids = guid_to_ids(guid) if guid else {}
+        payload_item: Dict[str, Union[str, int, dict]] = {"title": item.title}
+        year = normalize_year(getattr(item, "year", None))
+        if year is not None:
+            payload_item["year"] = year
+        if ids:
+            payload_item["ids"] = ids
+
+        if getattr(item, "type", "") == "movie":
+            movies.append(payload_item)
+        elif getattr(item, "type", "") in {"show", "season", "episode"}:
+            # Simkl list endpoint accepts shows.
+            shows.append(payload_item)
+
+    add_items_to_simkl_list(
+        headers,
+        movies=movies if movies else None,
+        shows=shows if shows else None,
+        target_list=target_list,
+    )
+    return len(movies) + len(shows)
+
+
 def simkl_movie_key(m: dict) -> Optional[str]:
     ids = m.get("ids", {})
     if ids.get("imdb"):
@@ -172,10 +284,22 @@ def get_simkl_history(
     Dict[str, Tuple[str, Optional[int], Optional[str]]],
     Dict[str, Tuple[str, str, Optional[str]]],
 ]:
+    """Return Simkl movie and episode history keyed on best GUID.
+
+    Fetches from both ``/sync/history`` (explicit watch events) and
+    ``/sync/all-items`` (completed items that may lack individual history
+    entries).
+
+    Returns:
+        Tuple containing:
+        - Movies: Dict[guid, (title, year, watched_at)]
+        - Episodes: Dict[guid, (show_title, episode_code, watched_at)]
+    """
     movies: Dict[str, Tuple[str, Optional[int], Optional[str]]] = {}
     episodes: Dict[str, Tuple[str, str, Optional[str]]] = {}
 
-    params = {"type": "movies"}
+    # --- /sync/history (movies) ---
+    params: dict = {"type": "movies"}
     if date_from:
         params["date_from"] = date_from
     logger.info("Fetching Simkl watch history…")
@@ -190,6 +314,7 @@ def get_simkl_history(
             if guid not in movies:
                 movies[guid] = (m.get("title"), normalize_year(m.get("year")), item.get("watched_at"))
 
+    # --- /sync/history (episodes) ---
     params = {"type": "episodes"}
     if date_from:
         params["date_from"] = date_from
@@ -205,6 +330,63 @@ def get_simkl_history(
                 continue
             if guid not in episodes:
                 episodes[guid] = (show.get("title"), f"S{e.get('season', 0):02d}E{e.get('number', 0):02d}", item.get("watched_at"))
+
+    # --- /sync/all-items (completed movies & shows with episodes) ---
+    logger.info("Fetching Simkl all-items (full)…")
+    resp = simkl_request(
+        "GET",
+        "/sync/all-items",
+        headers,
+        params={"extended": "full", "episode_watched_at": "yes"},
+    )
+    data = resp.json()
+    if data and isinstance(data, dict):
+        # Completed movies
+        completed_movies = data.get("movies", [])
+        for movie_item in completed_movies:
+            m = movie_item.get("movie", {})
+            guid = simkl_movie_key(m)
+            if not guid:
+                continue
+            if guid not in movies:
+                watched_at = movie_item.get("last_watched_at")
+                movies[guid] = (
+                    m.get("title"),
+                    normalize_year(m.get("year")),
+                    watched_at,
+                )
+
+        # Completed episodes from shows
+        completed_shows = data.get("shows", [])
+        for show_item in completed_shows:
+            show = show_item.get("show", {})
+            seasons = show_item.get("seasons", [])
+            for season in seasons:
+                season_num = season.get("number", 0)
+                season_episodes = season.get("episodes", [])
+                for episode in season_episodes:
+                    if not (
+                        episode.get("watched_at")
+                        or episode.get("plays", 0) > 0
+                        or episode.get("watched")
+                    ):
+                        continue
+
+                    episode_num = episode.get("number", 0)
+                    e = {
+                        "season": season_num,
+                        "number": episode_num,
+                        "ids": episode.get("ids", {}),
+                    }
+                    guid = simkl_episode_key(show, e)
+                    if not guid:
+                        continue
+                    if guid not in episodes:
+                        episodes[guid] = (
+                            show.get("title"),
+                            f"S{season_num:02d}E{episode_num:02d}",
+                            episode.get("watched_at"),
+                        )
 
     return movies, episodes
 
