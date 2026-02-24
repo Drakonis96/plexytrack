@@ -1,9 +1,61 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+venv/
+env/
+.venv/
+
+# Documentation (not needed in image)
+README.md
+CHANGELOG.md
+LICENSE
+screenshots/
+Python_Plex_API_documentation/
+trakt_api_documentation.txt
+simkl_api_documentation
+
+# Tests (not needed in image)
+tests/
+test_*.py
+
+# Database files
 *.db
 *.sqlite3
-.env
-.git
+
+# State files
+output.log
+trakt_tokens.json
+simkl_tokens.json
+provider.json
+selected_user.json
+settings.json
+watchlist_state.json
+plex_sync_state.json
+
+# Backups of old UI files
+*.bak
+
+# Docker compose files
+docker-compose*.yml
+Dockerfile
 

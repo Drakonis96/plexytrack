@@ -1,6 +1,32 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# App state / secrets
 output.log
+auth.json
+state.json
 trakt_tokens.json
 simkl_tokens.json
 provider.json
@@ -8,3 +34,13 @@ selected_user.json
 settings.json
 watchlist_state.json
 plex_sync_state.json
+*.log
+
+# Changelog (release notes live in GitHub Releases)
+CHANGELOG.md
+
+# Backups of old UI files
+*.bak
+
+# Docker
+docker-compose.override.yml

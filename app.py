@@ -122,7 +122,7 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.3"
+APP_VERSION = "v0.4.5"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -133,6 +133,11 @@ app = Flask(__name__)
 # request.url_root uses the external address and scheme.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-change-in-production')
+
+
+@app.context_processor
+def inject_version():
+    return {"app_version": APP_VERSION}
 
 SYNC_INTERVAL_MINUTES = 60  # default frequency
 SYNC_COLLECTION = False
@@ -2040,10 +2045,11 @@ def sync():
             logger.info("Found %d movies and %d episodes in Plex history (full sync).",
                        len(plex_movies), len(plex_episodes))
 
-            # Always do full sync for Plex -> Simkl: sync all items from Plex
-            # This ensures reliable episode detection without timestamp comparison issues
-            movies_to_add = set(plex_movies)
-            episodes_to_add = set(plex_episodes)
+            # Filter out items already on Simkl to avoid redundant API calls
+            simkl_movie_guids = set(simkl_movies)
+            simkl_episode_guids = set(simkl_episodes)
+            movies_to_add = set(plex_movies) - simkl_movie_guids
+            episodes_to_add = set(plex_episodes) - simkl_episode_guids
 
             logger.info(
                 "Found %d movies and %d episodes to add to Simkl",

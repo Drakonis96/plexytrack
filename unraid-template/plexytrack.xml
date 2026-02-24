@@ -1,0 +1,154 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>PlexyTrack</Name>
+  <Repository>drakonis96/plexytrack</Repository>
+  <Registry>https://hub.docker.com/r/drakonis96/plexytrack</Registry>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>Latest stable release</TagDescription>
+  </Branch>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Drakonis96/plexytrack/issues</Support>
+  <Project>https://github.com/Drakonis96/plexytrack</Project>
+  <Overview>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. It supports bidirectional sync of watched history, ratings, collections, liked lists and watchlists. A simple web UI lets you configure sync options, select Plex users, and create backups of your data. Live Sync via Plex webhooks is also available for instant updates.</Overview>
+  <Category>MediaApp:Other</Category>
+  <WebUI>http://[IP]:[PORT:5030]</WebUI>
+  <Icon>https://raw.githubusercontent.com/Drakonis96/plexytrack/main/static/logo2.png</Icon>
+  <Description>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. It supports bidirectional sync of watched history, ratings, collections, liked lists and watchlists. A simple web UI lets you configure sync options, select Plex users, and create backups of your data.</Description>
+  <DonateText/>
+  <DonateLink/>
+  <DonateImg/>
+  <ExtraSearchTerms>plex trakt simkl sync media tracker</ExtraSearchTerms>
+  <Requires>Plex Media Server and a Trakt and/or Simkl account with API credentials.</Requires>
+  <Changes>https://github.com/Drakonis96/plexytrack/blob/main/CHANGELOG.md</Changes>
+
+  <!-- Port -->
+  <Config
+    Name="Web UI Port"
+    Target="5030"
+    Default="5030"
+    Mode="tcp"
+    Description="Port for the PlexyTrack web interface."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">5030</Config>
+
+  <!-- Volumes -->
+  <Config
+    Name="Config Directory"
+    Target="/config"
+    Default="/mnt/user/appdata/plexytrack/config"
+    Mode="rw"
+    Description="Path to store PlexyTrack configuration files (tokens, settings)."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/plexytrack/config</Config>
+
+  <Config
+    Name="State Directory"
+    Target="/state"
+    Default="/mnt/user/appdata/plexytrack/state"
+    Mode="rw"
+    Description="Path to store PlexyTrack sync state files."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/plexytrack/state</Config>
+
+  <!-- Required Environment Variables -->
+  <Config
+    Name="Plex Server URL"
+    Target="PLEX_BASEURL"
+    Default="http://your-plex-ip:32400"
+    Description="URL of your Plex Media Server (e.g. http://192.168.1.100:32400)."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"/>
+
+  <Config
+    Name="Plex Token"
+    Target="PLEX_TOKEN"
+    Default=""
+    Description="Your Plex authentication token. See: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"/>
+
+  <!-- Trakt -->
+  <Config
+    Name="Trakt Client ID"
+    Target="TRAKT_CLIENT_ID"
+    Default=""
+    Description="Client ID from your Trakt API application. Required if syncing with Trakt."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"/>
+
+  <Config
+    Name="Trakt Client Secret"
+    Target="TRAKT_CLIENT_SECRET"
+    Default=""
+    Description="Client Secret from your Trakt API application. Required if syncing with Trakt."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"/>
+
+  <!-- Simkl -->
+  <Config
+    Name="Simkl Client ID"
+    Target="SIMKL_CLIENT_ID"
+    Default=""
+    Description="Client ID from your Simkl API application. Required if syncing with Simkl."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"/>
+
+  <Config
+    Name="Simkl Client Secret"
+    Target="SIMKL_CLIENT_SECRET"
+    Default=""
+    Description="Client Secret from your Simkl API application. Required if syncing with Simkl."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"/>
+
+  <!-- Optional Environment Variables -->
+  <Config
+    Name="Timezone"
+    Target="TZ"
+    Default="Europe/Madrid"
+    Description="Timezone for log timestamps (e.g. America/New_York, Europe/London)."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false">Europe/Madrid</Config>
+
+  <Config
+    Name="Trakt Redirect URI"
+    Target="TRAKT_REDIRECT_URI"
+    Default=""
+    Description="Custom OAuth redirect URI for Trakt (optional). Leave empty for auto-detection."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"/>
+
+  <Config
+    Name="Simkl Redirect URI"
+    Target="SIMKL_REDIRECT_URI"
+    Default=""
+    Description="Custom OAuth redirect URI for Simkl (optional). Leave empty for auto-detection."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false"/>
+</Container>
