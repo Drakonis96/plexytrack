@@ -11,9 +11,13 @@ PlexyTrackt – Synchronizes Plex watched history with Trakt.
 import os
 import json
 import logging
+import secrets
+import hashlib
+import hmac
 from datetime import datetime, timezone
 from numbers import Number
 from typing import Dict, List, Optional, Set, Tuple, Union
+from functools import wraps
 import time
 
 import requests
@@ -27,10 +31,11 @@ from flask import (
     jsonify,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask import send_file, session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
@@ -122,7 +127,7 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.5"
+APP_VERSION = "v0.4.6"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -132,7 +137,14 @@ app = Flask(__name__)
 # Honor X-Forwarded headers when running behind a reverse proxy so that
 # request.url_root uses the external address and scheme.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-change-in-production')
+# Generate a strong random secret key if not provided via env
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
+# Secure session cookie settings for internet-exposed deployment
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=86400,  # 24 hours
+)
 
 
 @app.context_processor
@@ -153,10 +165,14 @@ STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 PROVIDER_FILE = os.path.join(CONFIG_DIR, "provider.json")
+CREDENTIALS_FILE = os.path.join(CONFIG_DIR, "credentials.json")
+SELECTED_USER_FILE = os.path.join(CONFIG_DIR, "selected_user.json")
 SAFE_MODE = False
 scheduler = BackgroundScheduler()
 plex = None  # will hold PlexServer instance
 plex_account = None  # will hold MyPlexAccount instance
+_plex_connection_ok = False  # Flag: True after successful connection, False on failure
+_sync_lock = Lock()  # Prevent concurrent sync execution
 
 # Sync direction constants
 DIRECTION_BOTH = "both"
@@ -173,6 +189,12 @@ COLLECTION_SYNC_DIRECTION = DIRECTION_BOTH
 # Watchlist sync behavior
 WATCHLIST_CONFLICT_RESOLUTION = "last_wins"  # "last_wins" | "additive_only" | "manual"
 WATCHLIST_REMOVAL_ENABLED = True
+
+# Redirect URI management – saved URIs and active selection per service
+REDIRECT_URIS = {
+    "trakt": {"saved": [], "active": ""},
+    "simkl": {"saved": [], "active": ""},
+}
 
 # Global storage for session-based Plex credentials (for scheduler access)
 session_plex_credentials = {
@@ -207,6 +229,93 @@ def verify_volume(path: str, name: str) -> None:
 # AUTH / SETTINGS
 # --------------------------------------------------------------------------- #
 SETTINGS_FILE = os.path.join(CONFIG_DIR, "settings.json")
+
+
+# --------------------------------------------------------------------------- #
+# USER AUTHENTICATION (PlexyTrack login)
+# --------------------------------------------------------------------------- #
+_login_attempts: Dict[str, list] = {}  # IP → list of timestamps
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def _is_rate_limited(ip: str) -> bool:
+    """Return True if the IP has exceeded the login attempt limit."""
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    # Remove old attempts outside the window
+    attempts = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+    _login_attempts[ip] = attempts
+    return len(attempts) >= _LOGIN_MAX_ATTEMPTS
+
+
+def _record_login_attempt(ip: str) -> None:
+    """Record a failed login attempt for rate limiting."""
+    if ip not in _login_attempts:
+        _login_attempts[ip] = []
+    _login_attempts[ip].append(time.time())
+
+
+def load_credentials() -> dict:
+    """Load user credentials from CREDENTIALS_FILE."""
+    if os.path.exists(CREDENTIALS_FILE):
+        try:
+            with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.error("Failed to load credentials: %s", exc)
+    return {}
+
+
+def save_credentials(data: dict) -> None:
+    """Persist user credentials to CREDENTIALS_FILE."""
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        # Restrict file permissions so only owner can read
+        os.chmod(CREDENTIALS_FILE, 0o600)
+    except Exception as exc:
+        logger.error("Failed to save credentials: %s", exc)
+
+
+def ensure_default_credentials() -> None:
+    """Create default admin/admin credentials if none exist."""
+    creds = load_credentials()
+    if not creds.get("username") or not creds.get("password_hash"):
+        creds = {
+            "username": "admin",
+            "password_hash": generate_password_hash(
+                "admin", method="pbkdf2:sha256", salt_length=16
+            ),
+        }
+        save_credentials(creds)
+        logger.info("Default credentials created (admin/admin). Change the password!")
+
+
+def verify_credentials(username: str, password: str) -> bool:
+    """Verify username/password against stored credentials."""
+    creds = load_credentials()
+    stored_user = creds.get("username", "")
+    stored_hash = creds.get("password_hash", "")
+    if not stored_user or not stored_hash:
+        return False
+    # Constant-time comparison for username
+    user_ok = hmac.compare_digest(username.lower(), stored_user.lower())
+    pass_ok = check_password_hash(stored_hash, password)
+    return user_ok and pass_ok
+
+
+def login_required(f):
+    """Decorator to require authentication for a route."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("authenticated"):
+            if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": False, "error": "Authentication required"}), 401
+            return redirect(url_for("login_page"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 # --------------------------------------------------------------------------- #
@@ -245,6 +354,7 @@ def load_settings() -> None:
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION
     global WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
     global WATCHLIST_CONFLICT_RESOLUTION, WATCHLIST_REMOVAL_ENABLED
+    global REDIRECT_URIS
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -267,6 +377,13 @@ def load_settings() -> None:
             )
             WATCHLIST_CONFLICT_RESOLUTION = data.get("watchlist_conflict_resolution", WATCHLIST_CONFLICT_RESOLUTION)
             WATCHLIST_REMOVAL_ENABLED = data.get("watchlist_removal_enabled", WATCHLIST_REMOVAL_ENABLED)
+            # Redirect URIs
+            stored_uris = data.get("redirect_uris")
+            if stored_uris and isinstance(stored_uris, dict):
+                for svc in ("trakt", "simkl"):
+                    if svc in stored_uris and isinstance(stored_uris[svc], dict):
+                        REDIRECT_URIS[svc]["saved"] = stored_uris[svc].get("saved", [])
+                        REDIRECT_URIS[svc]["active"] = stored_uris[svc].get("active", "")
             logger.info("Loaded sync settings from %s", SETTINGS_FILE)
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to load settings: %s", exc)
@@ -289,6 +406,7 @@ def save_settings() -> None:
         "collection_direction": COLLECTION_SYNC_DIRECTION,
         "watchlist_conflict_resolution": WATCHLIST_CONFLICT_RESOLUTION,
         "watchlist_removal_enabled": WATCHLIST_REMOVAL_ENABLED,
+        "redirect_uris": REDIRECT_URIS,
     }
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -308,7 +426,15 @@ class TraktAccountLimitError(Exception):
 
 
 def get_trakt_redirect_uri() -> str:
-    """Return the Trakt redirect URI derived from the current request."""
+    """Return the Trakt redirect URI.
+
+    Priority: 1) active URI from settings, 2) env var, 3) request-based, 4) default.
+    """
+    # 1. Active URI saved via the UI
+    active = REDIRECT_URIS.get("trakt", {}).get("active", "")
+    if active:
+        return active
+    # 2. Environment variable
     uri = os.environ.get("TRAKT_REDIRECT_URI")
     if uri:
         return uri
@@ -318,7 +444,15 @@ def get_trakt_redirect_uri() -> str:
 
 
 def get_simkl_redirect_uri() -> str:
-    """Return the Simkl redirect URI derived from the current request."""
+    """Return the Simkl redirect URI.
+
+    Priority: 1) active URI from settings, 2) env var, 3) request-based, 4) default.
+    """
+    # 1. Active URI saved via the UI
+    active = REDIRECT_URIS.get("simkl", {}).get("active", "")
+    if active:
+        return active
+    # 2. Environment variable
     uri = os.environ.get("SIMKL_REDIRECT_URI")
     if uri:
         return uri
@@ -371,7 +505,7 @@ def get_plex_server_legacy():
 
 def get_plex_server():
     """Return a connected :class:`PlexServer` instance or ``None``."""
-    global plex, plex_account
+    global plex, plex_account, _plex_connection_ok
     if plex is None:
         from flask import has_request_context, session
         token = None
@@ -393,6 +527,10 @@ def get_plex_server():
         if not token:
             token = os.environ.get("PLEX_TOKEN")
 
+        if not token or not baseurl:
+            logger.error("Missing Plex token or base URL for connection")
+            return None
+
         if token and baseurl:
             try:
                 from plexapi.server import PlexServer
@@ -406,14 +544,22 @@ def get_plex_server():
                 except Exception as acc_exc:
                     logger.warning("Could not create MyPlexAccount: %s", acc_exc)
                     plex_account = None
-                    plex._cached_account_id = None
+                    if plex:
+                        plex._cached_account_id = None
+                _plex_connection_ok = True
                 logger.info("Successfully connected to Plex using token and configured base URL")
                 return plex
             except Exception as exc:
                 logger.warning("Token-based authentication failed: %s", exc)
+                plex = None
 
         # Last resort: método legacy con token
-        plex = get_plex_server_legacy()
+        legacy = get_plex_server_legacy()
+        if legacy is not None:
+            plex = legacy
+            _plex_connection_ok = True
+        else:
+            _plex_connection_ok = False
         plex_account = None
 
     return plex
@@ -595,6 +741,34 @@ def refresh_trakt_token() -> Optional[str]:
     )
     logger.info("Trakt access token refreshed")
     return data["access_token"]
+
+
+def load_plex_token() -> bool:
+    """Load Plex token + base URL from auth.json if available."""
+    auth = load_auth()
+    plex_data = auth.get("plex")
+    if plex_data:
+        token = plex_data.get("token", "")
+        baseurl = plex_data.get("baseurl", "")
+        if token:
+            os.environ["PLEX_TOKEN"] = token
+            if baseurl:
+                os.environ["PLEX_BASE_URL"] = baseurl
+            save_session_credentials(token, baseurl)
+            logger.info("Loaded Plex token from %s", AUTH_FILE)
+            return True
+    return False
+
+
+def save_plex_token(token: str, baseurl: str = "") -> None:
+    """Persist Plex token + base URL to auth.json."""
+    auth = load_auth()
+    auth["plex"] = {
+        "token": token,
+        "baseurl": baseurl,
+    }
+    save_auth(auth)
+    logger.info("Saved Plex token to %s", AUTH_FILE)
 
 
 def load_simkl_tokens() -> bool:
@@ -1715,8 +1889,6 @@ def update_simkl(
         logger.error("Failed to update Simkl: %s", e)
     except Exception as e:
         logger.error("Failed to update Simkl: %s", e)
-    except requests.exceptions.RequestException as e:
-        logger.error("Failed to update Simkl: %s", e)
 
 
 # --------------------------------------------------------------------------- #
@@ -1808,6 +1980,21 @@ def sync_watchlists_only(
 
 def sync():
     """Run the main synchronization logic with selected user."""
+    if not _sync_lock.acquire(blocking=False):
+        logger.warning("Sync already in progress, skipping this run")
+        return
+    try:
+        _sync_inner()
+    except Exception as exc:
+        import traceback
+        logger.error("Sync crashed with unhandled exception: %s", exc)
+        logger.error("Traceback: %s", traceback.format_exc())
+    finally:
+        _sync_lock.release()
+
+
+def _sync_inner():
+    """Internal sync logic (called under _sync_lock)."""
     if stop_event.is_set():
         logger.info("Sync aborted before start")
         return
@@ -1816,6 +2003,13 @@ def sync():
     
     if not test_connections():
         logger.error("Sync cancelled due to connection errors.")
+        return
+
+    # Capture a local reference to the Plex server to avoid race conditions
+    # (e.g. re-auth or logout in another thread setting global plex to None)
+    sync_plex = plex
+    if sync_plex is None:
+        logger.error("Plex server not available after connection test. Aborting sync.")
         return
 
     # Check if a user is selected for sync
@@ -1829,6 +2023,8 @@ def sync():
     # Validate bidirectional sync configuration
     validate_bidirectional_sync_config()
     
+    # Reload all tokens (Plex token may have been saved to auth.json)
+    load_plex_token()
     trakt_enabled = load_trakt_tokens()
     simkl_enabled = load_simkl_tokens()
 
@@ -1870,9 +2066,9 @@ def sync():
                 logger.info("Sync cancelled")
                 return
             
-            # Always do full sync with Plex - get all history without date filtering
+            # Fetch Plex history (incremental if lastSync exists, full on first run)
             plex_movies, plex_episodes = get_selected_user_history()
-            logger.info("Found %d movies and %d episodes in Plex history (full sync).",
+            logger.info("Found %d movies and %d episodes in Plex history.",
                        len(plex_movies), len(plex_episodes))
             plex_movie_guids = set(plex_movies.keys())
             plex_episode_guids = set(plex_episodes.keys())
@@ -1930,10 +2126,18 @@ def sync():
             
             # Bidirectional sync: Mark missing items as watched for selected user (only for owner users)
             if HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX) and selected_user.get("is_owner", False):
-                if missing_movies or missing_episodes:
+                # Safety: if Plex returned 0 items but provider has many, the Plex
+                # connection likely failed — skip bidirectional sync entirely.
+                if not _plex_connection_ok:
+                    logger.warning("Skipping bidirectional sync: Plex connection was not verified successfully.")
+                elif len(plex_movie_guids) == 0 and len(plex_episode_guids) == 0 and (len(trakt_movie_guids) > 0 or len(trakt_episode_guids) > 0):
+                    logger.warning("Skipping bidirectional sync: Plex returned 0 items while Trakt has %d. "
+                                   "This likely indicates a Plex connection issue.", 
+                                   len(trakt_movie_guids) + len(trakt_episode_guids))
+                elif missing_movies or missing_episodes:
                     total_items = len(missing_movies) + len(missing_episodes)
                     
-                    # Safety check: if too many items, ask for confirmation or skip
+                    # Safety check: if too many items, limit for safety
                     if total_items > 100:
                         logger.warning("Bidirectional sync wants to mark %d items as watched. This is a large number!", total_items)
                         logger.warning("This might indicate that your Plex history isn't being read correctly.")
@@ -2013,20 +2217,6 @@ def sync():
                     logger.info("Skipping bidirectional sync for managed user %s: %d movies and %d episodes would have been synced from Trakt to Plex",
                                selected_user["username"], len(missing_movies), len(missing_episodes))
 
-            if SYNC_LIKED_LISTS:
-                if stop_event.is_set():
-                    logger.info("Sync cancelled")
-                    return
-                try:
-                    if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
-                        sync_liked_lists(plex, headers)
-                    if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
-                        sync_collections_to_trakt(plex, headers)
-                except TraktAccountLimitError as exc:
-                    logger.error("Liked-lists sync skipped: %s", exc)
-                except Exception as exc:
-                    logger.error("Liked-lists sync failed: %s", exc)
-
         elif SYNC_PROVIDER == "simkl":
             logger.info("Provider: Simkl")
             simkl_movies, simkl_episodes = get_simkl_history(headers)
@@ -2040,9 +2230,9 @@ def sync():
                 logger.info("Sync cancelled")
                 return
             
-            # Always do full sync with Plex - get all history without date filtering
+            # Fetch Plex history (incremental if lastSync exists, full on first run)
             plex_movies, plex_episodes = get_selected_user_history()
-            logger.info("Found %d movies and %d episodes in Plex history (full sync).",
+            logger.info("Found %d movies and %d episodes in Plex history.",
                        len(plex_movies), len(plex_episodes))
 
             # Filter out items already on Simkl to avoid redundant API calls
@@ -2084,7 +2274,7 @@ def sync():
                 # Intentamos obtener la serie desde la biblioteca de Plex para extraer un GUID válido (imdb/tmdb/tvdb) a nivel de serie.
                 show_guid = None
                 try:
-                    show_obj = get_show_from_library(plex, show_title)
+                    show_obj = get_show_from_library(sync_plex, show_title)
                     if show_obj:
                         show_guid = imdb_guid(show_obj) or best_guid(show_obj)
                 except Exception as exc:
@@ -2113,26 +2303,34 @@ def sync():
 
             # Plex <- Simkl (only for owner users)
             if HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX) and selected_user.get("is_owner", False):
-                movies_to_add_plex = set(simkl_movies) - set(plex_movies)
-                episodes_to_add_plex = set(simkl_episodes) - set(plex_episodes)
-                logger.info(
-                    "Found %d movies and %d episodes to add to Plex",
-                    len(movies_to_add_plex),
-                    len(episodes_to_add_plex),
-                )
-                movies_to_add_plex_fmt = {
-                    (simkl_movies[m][0], simkl_movies[m][1], m)
-                    for m in movies_to_add_plex
-                }
-                episodes_to_add_plex_fmt = {
-                    (simkl_episodes[e][0], simkl_episodes[e][1], e)
-                    for e in episodes_to_add_plex
-                }
-                if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
-                    if stop_event.is_set():
-                        logger.info("Sync cancelled")
-                        return
-                    update_plex(plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
+                # Safety: skip if Plex connection is suspect or incremental sync returned 0 items
+                if not _plex_connection_ok:
+                    logger.warning("Skipping bidirectional sync (Simkl -> Plex): Plex connection was not verified successfully.")
+                elif len(plex_movies) == 0 and len(plex_episodes) == 0 and (len(simkl_movies) > 0 or len(simkl_episodes) > 0):
+                    logger.warning("Skipping bidirectional sync (Simkl -> Plex): Plex returned 0 items while Simkl has %d. "
+                                   "This is expected during incremental sync.",
+                                   len(simkl_movies) + len(simkl_episodes))
+                else:
+                    movies_to_add_plex = set(simkl_movies) - set(plex_movies)
+                    episodes_to_add_plex = set(simkl_episodes) - set(plex_episodes)
+                    logger.info(
+                        "Found %d movies and %d episodes to add to Plex",
+                        len(movies_to_add_plex),
+                        len(episodes_to_add_plex),
+                    )
+                    movies_to_add_plex_fmt = {
+                        (simkl_movies[m][0], simkl_movies[m][1], m)
+                        for m in movies_to_add_plex
+                    }
+                    episodes_to_add_plex_fmt = {
+                        (simkl_episodes[e][0], simkl_episodes[e][1], e)
+                        for e in episodes_to_add_plex
+                    }
+                    if movies_to_add_plex_fmt or episodes_to_add_plex_fmt:
+                        if stop_event.is_set():
+                            logger.info("Sync cancelled")
+                            return
+                        update_plex(sync_plex, movies_to_add_plex_fmt, episodes_to_add_plex_fmt)
             elif HISTORY_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
                 movies_to_add_plex = set(simkl_movies) - set(plex_movies)
                 episodes_to_add_plex = set(simkl_episodes) - set(plex_episodes)
@@ -2144,6 +2342,8 @@ def sync():
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Error during sync: %s", exc)
+        import traceback
+        logger.debug("Sync error traceback: %s", traceback.format_exc())
 
     # Ratings sync
     if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
@@ -2151,24 +2351,36 @@ def sync():
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            sync_ratings(plex, headers)
+            try:
+                sync_ratings(sync_plex, headers)
+            except Exception as exc:
+                logger.error("Ratings sync (Plex -> Trakt) failed: %s", exc)
         elif SYNC_PROVIDER == "simkl":
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            sync_simkl_ratings(plex, headers)
+            try:
+                sync_simkl_ratings(sync_plex, headers)
+            except Exception as exc:
+                logger.error("Ratings sync (Plex -> Simkl) failed: %s", exc)
 
     if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
         if SYNC_PROVIDER == "trakt" and selected_user.get("is_owner", False):
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            apply_trakt_ratings(plex, headers)
+            try:
+                apply_trakt_ratings(sync_plex, headers)
+            except Exception as exc:
+                logger.error("Ratings sync (Trakt -> Plex) failed: %s", exc)
         elif SYNC_PROVIDER == "simkl" and selected_user.get("is_owner", False):
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            apply_simkl_ratings(plex, headers)
+            try:
+                apply_simkl_ratings(sync_plex, headers)
+            except Exception as exc:
+                logger.error("Ratings sync (Simkl -> Plex) failed: %s", exc)
 
     if SYNC_WATCHLISTS and SYNC_PROVIDER == "trakt":
         if stop_event.is_set():
@@ -2184,12 +2396,15 @@ def sync():
             plex_history_guids = set()
             trakt_history_guids = set()
         
-        sync_watchlists_only(
-            plex,
-            headers,
-            plex_history_guids,
-            trakt_history_guids,
-        )
+        try:
+            sync_watchlists_only(
+                sync_plex,
+                headers,
+                plex_history_guids,
+                trakt_history_guids,
+            )
+        except Exception as exc:
+            logger.error("Watchlist sync failed: %s", exc)
     elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
 
@@ -2197,7 +2412,10 @@ def sync():
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
-        sync_collection(plex, headers)
+        try:
+            sync_collection(sync_plex, headers)
+        except Exception as exc:
+            logger.error("Collection sync failed: %s", exc)
 
     if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
         logger.warning("Collection import from Trakt is not implemented.")
@@ -2206,17 +2424,21 @@ def sync():
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
-        sync_liked_lists(plex, headers)
+        try:
+            if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
+                logger.info("Starting liked lists sync (Trakt -> Plex)...")
+                sync_liked_lists(sync_plex, headers)
+                logger.info("Liked lists sync (Trakt -> Plex) completed.")
+            if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
+                logger.info("Starting collections sync (Plex -> Trakt)...")
+                sync_collections_to_trakt(sync_plex, headers)
+                logger.info("Collections sync (Plex -> Trakt) completed.")
+        except TraktAccountLimitError as exc:
+            logger.error("Liked-lists sync skipped: %s", exc)
+        except Exception as exc:
+            logger.error("Liked-lists sync failed: %s", exc)
     elif SYNC_LIKED_LISTS and SYNC_PROVIDER == "simkl":
         logger.warning("Liked lists sync with Simkl is not yet supported.")
-
-    if SYNC_PROVIDER == "trakt":
-        if stop_event.is_set():
-            logger.info("Sync cancelled")
-            return
-        sync_collections_to_trakt(plex, headers)
-    elif SYNC_PROVIDER == "simkl":
-        logger.warning("Plex Collections sync to Simkl is not yet supported.")
 
     if SYNC_WATCHED:
         save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
@@ -2364,7 +2586,263 @@ def restore_backup(headers, data: dict) -> None:
 # --------------------------------------------------------------------------- #
 # FLASK ROUTES
 # --------------------------------------------------------------------------- #
+
+# ---- Login / Authentication Routes ----
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    """Display login page and handle authentication."""
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        ip = request.remote_addr or "unknown"
+        if _is_rate_limited(ip):
+            error = "Too many failed attempts. Please wait 5 minutes."
+        else:
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            if verify_credentials(username, password):
+                session.permanent = True
+                session["authenticated"] = True
+                session["auth_user"] = username
+                logger.info("Successful login from %s", ip)
+                return redirect(url_for("index"))
+            else:
+                _record_login_attempt(ip)
+                error = "Invalid username or password."
+                logger.warning("Failed login attempt from %s for user '%s'", ip, username)
+
+    return render_template("login.html", error=error)
+
+
+@app.route("/api/change_password", methods=["POST"])
+@login_required
+def change_password():
+    """Change the user password. Requires current username and double confirmation."""
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    new_password = data.get("new_password", "")
+    confirm_password = data.get("confirm_password", "")
+
+    if not username or not new_password or not confirm_password:
+        return jsonify({"success": False, "error": "All fields are required."}), 400
+
+    if new_password != confirm_password:
+        return jsonify({"success": False, "error": "Passwords do not match."}), 400
+
+    if len(new_password) < 4:
+        return jsonify({"success": False, "error": "Password must be at least 4 characters."}), 400
+
+    creds = load_credentials()
+    stored_user = creds.get("username", "")
+    if not hmac.compare_digest(username.lower(), stored_user.lower()):
+        return jsonify({"success": False, "error": "Invalid username."}), 403
+
+    creds["password_hash"] = generate_password_hash(
+        new_password, method="pbkdf2:sha256", salt_length=16
+    )
+    save_credentials(creds)
+    logger.info("Password changed successfully for user '%s'", username)
+    return jsonify({"success": True, "message": "Password changed successfully."})
+
+
+@app.route("/api/disconnect_service", methods=["POST"])
+@login_required
+def disconnect_service():
+    """Disconnect from a specific service (plex, trakt, simkl) and wipe its tokens."""
+    data = request.get_json(silent=True) or {}
+    service = data.get("service", "").lower()
+
+    if service == "plex":
+        # Clear Plex tokens from auth file
+        auth = load_auth()
+        auth.pop("plex", None)
+        save_auth(auth)
+        # Clear env vars
+        os.environ.pop("PLEX_TOKEN", None)
+        os.environ.pop("PLEX_BASE_URL", None)
+        # Clear session credentials
+        clear_session_credentials()
+        # Clear Flask session Plex data
+        session.pop("plex_token", None)
+        session.pop("plex_baseurl", None)
+        # Reset global Plex variables
+        global plex, plex_account, _plex_connection_ok
+        plex = None
+        plex_account = None
+        _plex_connection_ok = False
+        # Clear selected user
+        if os.path.exists(SELECTED_USER_FILE):
+            os.remove(SELECTED_USER_FILE)
+        logger.info("Disconnected from Plex and wiped all Plex tokens")
+        return jsonify({"success": True, "message": "Disconnected from Plex."})
+
+    elif service == "trakt":
+        # Clear Trakt tokens from auth file
+        auth = load_auth()
+        auth.pop("trakt", None)
+        save_auth(auth)
+        # Clear env vars
+        os.environ.pop("TRAKT_ACCESS_TOKEN", None)
+        os.environ.pop("TRAKT_REFRESH_TOKEN", None)
+        os.environ.pop("TRAKT_EXPIRES_AT", None)
+        # Reset provider if it was trakt
+        if SYNC_PROVIDER == "trakt":
+            save_provider("none")
+        logger.info("Disconnected from Trakt and wiped all Trakt tokens")
+        return jsonify({"success": True, "message": "Disconnected from Trakt."})
+
+    elif service == "simkl":
+        # Clear Simkl tokens from auth file
+        auth = load_auth()
+        auth.pop("simkl", None)
+        save_auth(auth)
+        # Clear env vars
+        os.environ.pop("SIMKL_ACCESS_TOKEN", None)
+        # Reset provider if it was simkl
+        if SYNC_PROVIDER == "simkl":
+            save_provider("none")
+        logger.info("Disconnected from Simkl and wiped all Simkl tokens")
+        return jsonify({"success": True, "message": "Disconnected from Simkl."})
+
+    return jsonify({"success": False, "error": "Unknown service."}), 400
+
+
+@app.route("/api/wipe_all_data", methods=["POST"])
+@login_required
+def wipe_all_data():
+    """Wipe ALL residual data: tokens, state, config (except credentials)."""
+    try:
+        # Clear auth file (tokens for all services)
+        auth_data = {}
+        save_auth(auth_data)
+
+        # Clear env vars for all services
+        for var in ["PLEX_TOKEN", "PLEX_BASE_URL", "TRAKT_ACCESS_TOKEN",
+                     "TRAKT_REFRESH_TOKEN", "TRAKT_EXPIRES_AT", "SIMKL_ACCESS_TOKEN"]:
+            os.environ.pop(var, None)
+
+        # Clear session credentials
+        clear_session_credentials()
+
+        # Reset global Plex variables
+        global plex, plex_account, _plex_connection_ok
+        plex = None
+        plex_account = None
+        _plex_connection_ok = False
+
+        # Clear state files
+        for fname in os.listdir(STATE_DIR):
+            fpath = os.path.join(STATE_DIR, fname)
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+                logger.info("Removed state file: %s", fpath)
+
+        # Clear config files except credentials.json and settings.json
+        for fname in os.listdir(CONFIG_DIR):
+            fpath = os.path.join(CONFIG_DIR, fname)
+            if os.path.isfile(fpath) and fname not in ("credentials.json", "settings.json"):
+                os.remove(fpath)
+                logger.info("Removed config file: %s", fpath)
+
+        # Reset provider
+        save_provider("none")
+
+        # Stop scheduler
+        stop_scheduler()
+
+        logger.info("All residual data wiped successfully")
+        return jsonify({"success": True, "message": "All data wiped successfully. Tokens, state and identifiable data have been removed."})
+    except Exception as exc:
+        logger.error("Failed to wipe data: %s", exc)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# --------------------------------------------------------------------------- #
+# REDIRECT URI MANAGEMENT API
+# --------------------------------------------------------------------------- #
+@app.route("/api/redirect_uris", methods=["GET"])
+@login_required
+def get_redirect_uris():
+    """Return saved redirect URIs and the currently active one for each service."""
+    load_settings()
+    # Build the default URI for each service using the current request context
+    defaults = {
+        "trakt": request.url_root.rstrip("/") + "/oauth/trakt",
+        "simkl": request.url_root.rstrip("/") + "/oauth/simkl",
+    }
+    result = {}
+    for svc in ("trakt", "simkl"):
+        saved = list(REDIRECT_URIS.get(svc, {}).get("saved", []))
+        active = REDIRECT_URIS.get(svc, {}).get("active", "")
+        # Ensure the default URI is always present in the list
+        if defaults[svc] not in saved:
+            saved.insert(0, defaults[svc])
+        # Also include the env var value if set and not already listed
+        env_uri = os.environ.get(f"{svc.upper()}_REDIRECT_URI", "")
+        if env_uri and env_uri not in saved:
+            saved.insert(0, env_uri)
+        result[svc] = {"saved": saved, "active": active, "default": defaults[svc]}
+    return jsonify(result)
+
+
+@app.route("/api/redirect_uris", methods=["POST"])
+@login_required
+def save_redirect_uris_api():
+    """Save a new redirect URI or set the active one for a service.
+
+    Body JSON: { "service": "trakt"|"simkl", "action": "add"|"remove"|"set_active", "uri": "..." }
+    """
+    global REDIRECT_URIS
+    data = request.get_json(silent=True) or {}
+    service = (data.get("service") or "").lower()
+    action = data.get("action", "")
+    uri = (data.get("uri") or "").strip()
+
+    if service not in ("trakt", "simkl"):
+        return jsonify({"success": False, "error": "Invalid service. Use 'trakt' or 'simkl'."}), 400
+    if not uri:
+        return jsonify({"success": False, "error": "URI is required."}), 400
+
+    saved = REDIRECT_URIS[service].get("saved", [])
+
+    if action == "add":
+        if uri in saved:
+            return jsonify({"success": False, "error": "URI already exists."}), 409
+        saved.append(uri)
+        REDIRECT_URIS[service]["saved"] = saved
+        save_settings()
+        logger.info("Added redirect URI for %s: %s", service, uri)
+        return jsonify({"success": True, "message": f"URI added for {service}."})
+
+    elif action == "remove":
+        if uri in saved:
+            saved.remove(uri)
+            REDIRECT_URIS[service]["saved"] = saved
+            # If removing the active URI, clear active selection
+            if REDIRECT_URIS[service].get("active") == uri:
+                REDIRECT_URIS[service]["active"] = ""
+            save_settings()
+            logger.info("Removed redirect URI for %s: %s", service, uri)
+            return jsonify({"success": True, "message": f"URI removed for {service}."})
+        return jsonify({"success": False, "error": "URI not found."}), 404
+
+    elif action == "set_active":
+        REDIRECT_URIS[service]["active"] = uri
+        # Also ensure it's saved
+        if uri not in saved:
+            saved.append(uri)
+            REDIRECT_URIS[service]["saved"] = saved
+        save_settings()
+        logger.info("Set active redirect URI for %s: %s", service, uri)
+        return jsonify({"success": True, "message": f"Active URI set for {service}."})
+
+    return jsonify({"success": False, "error": "Invalid action. Use 'add', 'remove', or 'set_active'."}), 400
+
+
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def index():
     global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
@@ -2481,6 +2959,7 @@ def index():
 
 
 @app.route("/sync_once", methods=["POST"])
+@login_required
 def sync_once():
     global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, LIVE_SYNC
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
@@ -2551,18 +3030,43 @@ def sync_once():
 
 
 @app.route("/oauth")
+@login_required
 def oauth_index():
     """Landing page for OAuth callbacks."""
     return render_template("oauth.html", service=None, code=None)
 
 
 @app.route("/oauth/<service>")
+@login_required
 def oauth_callback(service: str):
-    """Display OAuth code for the given service."""
+    """Handle OAuth callback: auto-exchange code for tokens when possible."""
     service = service.lower()
     if service not in {"trakt", "simkl"}:
         return redirect(url_for("oauth_index"))
     code = request.args.get("code", "")
+
+    # Auto-exchange the code for tokens immediately
+    if code:
+        logger.info("Received OAuth callback for %s with authorization code", service)
+        if service == "trakt":
+            result = exchange_code_for_tokens(code)
+            if result:
+                if SYNC_PROVIDER == "none":
+                    save_provider("trakt")
+                logger.info("Trakt authorization completed successfully via OAuth callback")
+                return redirect(url_for("config_page"))
+            else:
+                logger.warning("Auto-exchange failed for Trakt, showing code for manual entry")
+        elif service == "simkl":
+            result = exchange_code_for_simkl_tokens(code)
+            if result:
+                if SYNC_PROVIDER == "none":
+                    save_provider("simkl")
+                logger.info("Simkl authorization completed successfully via OAuth callback")
+                return redirect(url_for("config_page"))
+            else:
+                logger.warning("Auto-exchange failed for Simkl, showing code for manual entry")
+
     return render_template(
         "oauth.html",
         service=service.capitalize(),
@@ -2571,23 +3075,27 @@ def oauth_callback(service: str):
 
 
 @app.route("/trakt")
+@login_required
 def trakt_callback():
     code = request.args.get("code", "")
     return redirect(url_for("oauth_callback", service="trakt", code=code))
 
 
 @app.route("/simkl")
+@login_required
 def simkl_callback():
     code = request.args.get("code", "")
     return redirect(url_for("oauth_callback", service="simkl", code=code))
 
 
 @app.route("/config", methods=["GET", "POST"])
+@login_required
 def config_page():
     """Display configuration status for Trakt and Simkl."""
     load_trakt_tokens()
     load_simkl_tokens()
     load_provider()
+    load_settings()
     if request.method == "POST":
         provider = request.form.get("provider", "none")
         save_provider(provider)
@@ -2602,10 +3110,13 @@ def config_page():
         trakt_configured=trakt_configured,
         simkl_configured=simkl_configured,
         provider=SYNC_PROVIDER,
+        trakt_redirect_uri=get_trakt_redirect_uri(),
+        simkl_redirect_uri=get_simkl_redirect_uri(),
     )
 
 
 @app.route("/authorize/<service>", methods=["GET", "POST"])
+@login_required
 def authorize_service(service: str):
     """Handle authorization for Trakt or Simkl."""
     service = service.lower()
@@ -2647,6 +3158,7 @@ def authorize_service(service: str):
 
 
 @app.route("/clear/<service>", methods=["POST"])
+@login_required
 def clear_service(service: str):
     """Remove stored tokens for the given service."""
     service = service.lower()
@@ -2673,6 +3185,7 @@ def clear_service(service: str):
 
 
 @app.route("/stop", methods=["POST"])
+@login_required
 def stop():
     stop_scheduler()
     return redirect(
@@ -2682,6 +3195,7 @@ def stop():
 
 
 @app.route("/backup")
+@login_required
 def backup_page():
     message = request.args.get("message")
     mtype = request.args.get("mtype", "success") if message else None
@@ -2689,6 +3203,7 @@ def backup_page():
 
 
 @app.route("/backup/download")
+@login_required
 def download_backup():
     load_trakt_tokens()
     trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
@@ -2716,6 +3231,7 @@ def download_backup():
 
 
 @app.route("/backup/restore", methods=["POST"])
+@login_required
 def restore_backup_route():
     load_trakt_tokens()
     trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
@@ -2750,6 +3266,7 @@ def restore_backup_route():
 
 @app.route("/migration", methods=["GET", "POST"])
 @app.route("/service_sync", methods=["GET", "POST"])
+@login_required
 def migration_page():
     """Synchronize history between Trakt and Simkl."""
     load_trakt_tokens()
@@ -2873,6 +3390,7 @@ def plex_webhook():
 
 
 @app.route("/users")
+@login_required
 def users_page():
     """Display Plex users and optional play history counts."""
     # No intentar conectar automáticamente - la página manejará la autenticación
@@ -2980,6 +3498,7 @@ def users_page():
 
 
 @app.route("/api/auth/plex", methods=["POST"])
+@login_required
 def api_auth_plex():
     """API endpoint for Plex authentication with email/password and optional 2FA."""
     data = request.get_json()
@@ -3038,10 +3557,17 @@ def api_auth_plex():
         # Also save token and base URL for scheduler access
         save_session_credentials(account.authToken, baseurl)
         
+        # Update environment variable so scheduler and sync threads can find it
+        os.environ["PLEX_TOKEN"] = account.authToken
+        
+        # Persist Plex token to auth.json so it survives container restarts
+        save_plex_token(account.authToken, baseurl or "")
+        
         # Reset global Plex variables to force re-authentication with new credentials
-        global plex, plex_account
+        global plex, plex_account, _plex_connection_ok
         plex = None
         plex_account = account
+        _plex_connection_ok = False
         
         return jsonify({
             "success": True, 
@@ -3057,6 +3583,7 @@ def api_auth_plex():
 
 
 @app.route("/api/plex/servers", methods=["GET"])
+@login_required
 def api_get_servers():
     """API endpoint to get available Plex servers for authenticated user."""
     auth_header = request.headers.get('Authorization')
@@ -3127,6 +3654,7 @@ def api_get_servers():
 
 
 @app.route("/api/plex/users", methods=["GET"])
+@login_required
 def api_get_users():
     """API endpoint to get users for a specific Plex server."""
     auth_header = request.headers.get('Authorization')
@@ -3223,6 +3751,7 @@ def api_get_users():
 
 
 @app.route("/api/plex/history", methods=["GET"])
+@login_required
 def api_get_user_history():
     """API endpoint to get viewing history for a specific user."""
     auth_header = request.headers.get('Authorization')
@@ -3329,22 +3858,18 @@ def api_get_user_history():
 
 @app.route("/logout", methods=["POST"])
 def logout():
-    """Clear all session data and log out the user."""
-    session.clear()
-    # Also clear global session credentials
-    clear_session_credentials()
-    # Reset global Plex variables
-    global plex, plex_account
-    plex = None
-    plex_account = None
-    return jsonify({"success": True, "message": "Successfully logged out"})
+    """Log out from PlexyTrack session only. Does NOT disconnect from Plex/Trakt/Simkl."""
+    session.pop("authenticated", None)
+    session.pop("auth_user", None)
+    return jsonify({"success": True, "message": "Successfully logged out", "redirect": "/login"})
 
 
 # --------------------------------------------------------------------------- #
 # SCHEDULER STARTUP
 # --------------------------------------------------------------------------- #
 def test_connections() -> bool:
-    global plex
+    global plex, _plex_connection_ok
+    _plex_connection_ok = False
     # Check session first, then fall back to stored credentials and environment variables
     from flask import has_request_context, session
 
@@ -3385,13 +3910,16 @@ def test_connections() -> bool:
     try:
         plex = get_plex_server()
         if plex is None:
+            logger.error("Failed to create Plex server connection")
             return False
         # Test connection by accessing server account info
         plex.account()
+        _plex_connection_ok = True
         logger.info("Successfully connected to Plex server.")
     except Exception as exc:
         logger.error("Failed to connect to Plex: %s", exc)
         plex = None
+        _plex_connection_ok = False
         return False
 
     if trakt_enabled:
@@ -3488,7 +4016,6 @@ def stop_scheduler():
 # --------------------------------------------------------------------------- #
 # USER SELECTION FOR SYNC
 # --------------------------------------------------------------------------- #
-SELECTED_USER_FILE = os.path.join(CONFIG_DIR, "selected_user.json")
 
 def load_selected_user():
     """Load selected user information from file."""
@@ -3552,9 +4079,14 @@ CACHE_DURATION = 300  # 5 minutes
 
 def reset_cache():
     """Reset all cached data to ensure fresh data on sync start"""
-    global _cached_users, _cached_users_timestamp
+    global _cached_users, _cached_users_timestamp, plex, plex_account, _plex_connection_ok
     _cached_users = None
     _cached_users_timestamp = None
+    
+    # Reset Plex connection to force re-authentication with current credentials
+    plex = None
+    plex_account = None
+    _plex_connection_ok = False
     
     # Reset sections cache from utils.py
     from utils import reset_sections_cache
@@ -3565,7 +4097,7 @@ def reset_cache():
     reset_movie_guid_cache()
     reset_show_guid_cache()
     
-    logger.debug("Cache reset - all cached data cleared (users, sections, movie GUIDs, and show GUIDs)")
+    logger.debug("Cache reset - all cached data cleared (users, sections, movie GUIDs, show GUIDs, and Plex connection)")
 
 def get_cached_users(account):
     """Get cached users list to avoid repeated API calls"""
@@ -3815,6 +4347,7 @@ def mark_as_watched_for_user(
 
 
 @app.route("/api/select_user", methods=["POST"])
+@login_required
 def select_user():
     """API endpoint to select a user for sync operations."""
     try:
@@ -3847,6 +4380,7 @@ def select_user():
         return jsonify({"success": False, "error": str(exc)})
 
 @app.route("/api/get_selected_user")
+@login_required
 def get_selected_user_api():
     """API endpoint to get currently selected user."""
     selected_user = load_selected_user()
@@ -3891,8 +4425,10 @@ if __name__ == "__main__":
     migrate_legacy_state()
     verify_volume(STATE_DIR, "state")
     state_data = load_state()
+    ensure_default_credentials()
     load_trakt_tokens()
     load_simkl_tokens()
+    load_plex_token()
     load_provider()
     load_settings()
     if state_data.get("lastSync") is None and not SYNC_WATCHED:

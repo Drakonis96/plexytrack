@@ -65,8 +65,8 @@
         try {
           const response = await fetch('/logout', { method: 'POST' });
           if (response.ok) {
-            localStorage.removeItem('plexytrackUsersState');
-            window.location.reload();
+            const data = await response.json();
+            window.location.href = data.redirect || '/login';
           } else {
             alert('Error logging out');
           }

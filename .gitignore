@@ -7,14 +7,17 @@ __pycache__/
 dist/
 build/
 *.egg
+.pytest_cache/
 
 # Virtual environments
 venv/
 env/
 .venv/
+
+# Environment variables
 .env
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
 *.swp
@@ -23,7 +26,11 @@ env/
 .DS_Store
 Thumbs.db
 
-# App state / secrets
+# App config & state directories (user data, never commit)
+config/
+state/
+
+# Legacy individual file patterns (kept for safety)
 output.log
 auth.json
 state.json
@@ -35,9 +42,6 @@ settings.json
 watchlist_state.json
 plex_sync_state.json
 *.log
-
-# Changelog (release notes live in GitHub Releases)
-CHANGELOG.md
 
 # Backups of old UI files
 *.bak

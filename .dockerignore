@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+.pytest_cache/
 
 # Git
 .git
@@ -21,6 +22,7 @@ Thumbs.db
 
 # Environment
 .env
+.env.example
 venv/
 env/
 .venv/
@@ -38,19 +40,17 @@ simkl_api_documentation
 tests/
 test_*.py
 
+# User data directories (not needed in image)
+config/
+state/
+
 # Database files
 *.db
 *.sqlite3
 
-# State files
+# Logs
+*.log
 output.log
-trakt_tokens.json
-simkl_tokens.json
-provider.json
-selected_user.json
-settings.json
-watchlist_state.json
-plex_sync_state.json
 
 # Backups of old UI files
 *.bak
@@ -58,4 +58,7 @@ plex_sync_state.json
 # Docker compose files
 docker-compose*.yml
 Dockerfile
+
+# Unraid template
+unraid-template/
 

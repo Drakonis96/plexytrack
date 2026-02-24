@@ -235,14 +235,26 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
         # Get account ID from server instead of MyPlexAccount to avoid auto-discovery
         try:
             server_account = plex_server.account()
-            account_id = server_account.id
+            # server.account() returns an Account object which uses 'accountID',
+            # not 'id' (which is on MyPlexAccount).
+            account_id = getattr(server_account, 'accountID', None) or getattr(server_account, 'id', None)
+            if not account_id:
+                raise AttributeError("Account object has neither 'accountID' nor 'id'")
         except Exception as exc:
-            logger.warning("Could not get account ID from server, falling back to MyPlexAccount: %s", exc)
+            logger.debug("Server account object has no ID attribute, using MyPlexAccount.id: %s", exc)
             # Fallback to cached value or MyPlexAccount.id
             account_id = getattr(plex_server, '_cached_account_id', None) or account.id
         
         # Get owner history from the server, filtered by account ID
-        history_items = plex_server.history(accountID=account_id, mindate=mindate, maxresults=None)
+        # PlexAPI expects a datetime object for mindate, not an ISO string
+        history_mindate = None
+        if mindate:
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                history_mindate = _dt.fromisoformat(mindate.replace("Z", "+00:00"))
+            except (TypeError, ValueError) as conv_exc:
+                logger.warning("Could not parse mindate %r, doing full sync: %s", mindate, conv_exc)
+        history_items = plex_server.history(accountID=account_id, mindate=history_mindate, maxresults=None)
 
         for entry in history_items:
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
@@ -803,7 +815,15 @@ def get_server_based_history(plex, mindate: Optional[str] = None) -> Tuple[
         f" since {mindate}" if mindate else " (full sync)",
     )
     try:
-        for entry in plex.history(mindate=mindate):
+        # PlexAPI expects a datetime object for mindate, not an ISO string
+        history_mindate = None
+        if mindate:
+            try:
+                from datetime import datetime as _dt
+                history_mindate = _dt.fromisoformat(mindate.replace("Z", "+00:00"))
+            except (TypeError, ValueError) as conv_exc:
+                logger.warning("Could not parse mindate %r, doing full sync: %s", mindate, conv_exc)
+        for entry in plex.history(mindate=history_mindate):
             watched_at = to_iso_z(getattr(entry, "viewedAt", None))
             if not watched_at:
                 # Entries with no watched timestamp are not actual play

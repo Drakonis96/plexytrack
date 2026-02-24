@@ -1165,3 +1165,266 @@ select.direction-select {
   color: #fbbf24;
   border-color: rgba(245,158,11,.2);
 }
+/* ---------- Login Page ---------- */
+.login-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-body);
+  padding: 20px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 40px 32px 28px;
+  box-shadow: var(--shadow-lg);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.login-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  margin: 0 auto 16px;
+}
+
+.login-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.login-subtitle {
+  color: var(--text-muted);
+  font-size: .9rem;
+}
+
+.login-form .form-group {
+  margin-bottom: 16px;
+}
+
+.login-btn {
+  width: 100%;
+  padding: 11px;
+  font-size: .95rem;
+  margin-top: 8px;
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: .8rem;
+}
+
+/* ---------- Config Tabs ---------- */
+.config-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: var(--shadow-sm);
+}
+
+.config-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: .875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.config-tab:hover {
+  background: var(--bg-badge);
+  color: var(--text-primary);
+}
+
+.config-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.config-tab svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.config-tab-content {
+  display: none;
+}
+
+.config-tab-content.active {
+  display: block;
+}
+
+/* ---------- Disconnect Grid ---------- */
+.disconnect-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.disconnect-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition);
+}
+
+.disconnect-item:hover {
+  border-color: var(--danger);
+}
+
+.disconnect-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.disconnect-info strong {
+  font-size: .95rem;
+  color: var(--text-primary);
+}
+
+@media (max-width: 480px) {
+  .disconnect-item {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+  .config-tabs {
+    flex-direction: column;
+  }
+}
+
+/* ---- Redirect URI Management ---- */
+.redirect-section {
+  margin-top: 1.25rem;
+}
+.redirect-section h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: .5rem;
+}
+.redirect-active-info {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .75rem;
+  flex-wrap: wrap;
+}
+.redirect-active-info code {
+  background: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: .85rem;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+.redirect-uri-list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin-bottom: .75rem;
+}
+.redirect-uri-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .5rem .75rem;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+.redirect-uri-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+}
+.redirect-uri-text {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.redirect-uri-text code {
+  font-size: .85rem;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+.redirect-uri-actions {
+  display: flex;
+  gap: .375rem;
+  flex-shrink: 0;
+}
+.btn-sm {
+  padding: 4px 10px !important;
+  font-size: .8rem !important;
+  min-height: auto !important;
+}
+.badge-active {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  font-size: .75rem;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+}
+.redirect-add-form {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+}
+.redirect-add-form .form-input {
+  flex: 1;
+  margin-bottom: 0;
+}
+.redirect-add-form .button {
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .redirect-uri-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .redirect-add-form {
+    flex-direction: column;
+  }
+  .redirect-add-form .form-input {
+    width: 100%;
+  }
+}

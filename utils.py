@@ -171,38 +171,72 @@ _cached_sections = {}
 _cached_sections_timestamp = {}
 SECTION_CACHE_DURATION = 600  # 10 minutes
 
+# GUID index cache for fast lookups (built once, valid for SECTION_CACHE_DURATION)
+_guid_index: Dict[str, Dict[str, object]] = {}  # server_key -> {guid -> plex_item}
+_guid_index_timestamp: Dict[str, float] = {}
+
 def reset_sections_cache():
     """Reset the library sections cache"""
-    global _cached_sections, _cached_sections_timestamp
+    global _cached_sections, _cached_sections_timestamp, _guid_index, _guid_index_timestamp
     _cached_sections.clear()
     _cached_sections_timestamp.clear()
+    _guid_index.clear()
+    _guid_index_timestamp.clear()
 
-def find_item_by_guid(plex, guid):
-    """Return a movie or show from Plex matching the given GUID."""
-    import time
-    
-    # Get cached sections for this plex server
-    server_key = getattr(plex, 'machineIdentifier', 'default')
-    current_time = time.time()
-    
-    if (server_key not in _cached_sections or 
-        server_key not in _cached_sections_timestamp or
-        current_time - _cached_sections_timestamp[server_key] > SECTION_CACHE_DURATION):
-        
-        _cached_sections[server_key] = list(plex.library.sections())
-        _cached_sections_timestamp[server_key] = current_time
-    
-    sections = _cached_sections[server_key]
-    
-    # Search in cached library sections first
-    for sec in sections:
-        if sec.type in ("movie", "show"):
+
+def _build_guid_index(plex) -> Dict[str, object]:
+    """Build a GUID -> Plex item index for fast lookups.
+
+    Scans all movie and show library sections once and indexes items by their
+    external GUIDs (imdb://, tmdb://, tvdb://).  This avoids the extremely slow
+    ``sec.getGuid()`` call which performs an API match request per item.
+    """
+    index: Dict[str, object] = {}
+    try:
+        for sec in plex.library.sections():
+            if sec.type not in ("movie", "show"):
+                continue
             try:
-                return sec.getGuid(guid)
+                items = sec.all()
             except Exception:
                 continue
+            for item in items:
+                # Primary GUID
+                primary = getattr(item, "guid", None)
+                if primary:
+                    index[primary] = item
+                # External GUIDs (Guid objects with .id attribute)
+                for g in getattr(item, "guids", []):
+                    gid = getattr(g, "id", None)
+                    if gid:
+                        index[gid] = item
+    except Exception as exc:
+        logger.warning("Failed to build GUID index: %s", exc)
+    logger.info("Built GUID index with %d entries", len(index))
+    return index
 
-    return None
+
+def find_item_by_guid(plex, guid):
+    """Return a movie or show from Plex matching the given GUID.
+
+    Uses a prebuilt GUID index for fast O(1) lookups instead of per-item API
+    calls.  The index is rebuilt every ``SECTION_CACHE_DURATION`` seconds.
+    """
+    import time
+
+    server_key = getattr(plex, "machineIdentifier", "default")
+    current_time = time.time()
+
+    # Build / refresh GUID index
+    if (
+        server_key not in _guid_index
+        or server_key not in _guid_index_timestamp
+        or current_time - _guid_index_timestamp[server_key] > SECTION_CACHE_DURATION
+    ):
+        _guid_index[server_key] = _build_guid_index(plex)
+        _guid_index_timestamp[server_key] = current_time
+
+    return _guid_index[server_key].get(guid)
 
 
 def ensure_collection(plex, section, name, first_item=None):
