@@ -5,155 +5,85 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PlexyTrack - 2FA Verification</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
-    <style>
-        .two-fa-container {
-            max-width: 400px;
-            margin: 50px auto;
-            padding: 30px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .two-fa-header {
-            margin-bottom: 30px;
-        }
-        .two-fa-header h2 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 24px;
-        }
-        .two-fa-header p {
-            color: #666;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        .code-input {
-            width: 100%;
-            padding: 15px;
-            font-size: 20px;
-            text-align: center;
-            border: 2px solid #e1e5e9;
-            border-radius: 8px;
-            margin: 20px 0;
-            letter-spacing: 3px;
-            font-family: 'Courier New', monospace;
-            transition: border-color 0.3s;
-        }
-        .code-input:focus {
-            outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
-        }
-        .submit-btn {
-            width: 100%;
-            padding: 12px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        .submit-btn:hover {
-            background: #0056b3;
-        }
-        .error-message {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border: 1px solid #f5c6cb;
-        }
-        .back-link {
-            display: inline-block;
-            margin-top: 20px;
-            color: #007bff;
-            text-decoration: none;
-            font-size: 14px;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-    </style>
 </head>
 <body>
-    <div class="app-container">
-        <header class="app-header">
-            <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
-            <h1>PlexyTrack</h1>
-        </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack" class="logo">
+        <span>PlexyTrack</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="{{ url_for('index') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M2.5 22v-6h6"/><path d="M22 11.5A10 10 0 0 0 3.2 7.2"/><path d="M2 12.5a10 10 0 0 0 18.8 4.3"/></svg>Sync</a>
+        <a href="{{ url_for('migration_page') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 16-4-4 4-4"/></svg>Migration</a>
+        <a href="{{ url_for('backup_page') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><polyline points="14 2 14 8 20 8"/><path d="m3 15 2 2 4-4"/><path d="m3 21 2-2"/></svg>Backup</a>
+        <a href="{{ url_for('config_page') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Tracker Login</a>
+        <a href="{{ url_for('users_page') }}" class="nav-link active"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Plex Login</a>
+        <a href="{{ url_for('oauth_index') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>OAuth</a>
+      </nav>
+    </aside>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div class="top-header-left">
+          <button class="hamburger-btn" id="hamburgerBtn" aria-label="Toggle menu"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button>
+          <h1 class="page-title">2FA Verification</h1>
+        </div>
+        <div class="top-header-right">
+          <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme"><svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+        </div>
+      </header>
 
-        <main class="content-area">
-            <div class="two-fa-container">
-                <div class="two-fa-header">
-                    <h2>🔐 2FA Verification Required</h2>
-                    <p>Please enter the 6-digit verification code from your authenticator app to complete the login process.</p>
-                </div>
-                
-                {% if error %}
-                    <div class="error-message">{{ error }}</div>
-                {% endif %}
-                
-                <form method="post">
-                    <input type="text" 
-                           id="code" 
-                           name="code" 
-                           class="code-input"
-                           maxlength="6" 
-                           placeholder="000000"
-                           required 
-                           autofocus
-                           pattern="[0-9]{6}"
-                           title="Please enter a 6-digit numeric code">
-                    <button type="submit" class="submit-btn">Verify Code</button>
-                </form>
-                
-                <a href="{{ url_for('users_page') }}" class="back-link">← Back to login</a>
+      <main class="content-area">
+        <div class="twofa-card">
+          <div class="twofa-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h2>Two-Factor Authentication</h2>
+          <p class="text-muted text-sm">Enter the 6-digit verification code from your authenticator app.</p>
+
+          {% if error %}
+          <div class="error-message">{{ error }}</div>
+          {% endif %}
+
+          <form action="{{ url_for('plex_2fa') }}" method="POST" id="twoFAForm" autocomplete="off">
+            <div class="form-group" style="text-align:center;">
+              <input type="text" id="twoFACode" name="code" maxlength="6" placeholder="000000"
+                     class="twofa-input" inputmode="numeric" pattern="\d{6}" required autofocus>
             </div>
-        </main>
+            <button type="submit" class="btn-primary" style="width:100%;">Verify</button>
+          </form>
+          <a href="{{ url_for('users_page') }}" class="back-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+            Back to Plex Login
+          </a>
+        </div>
+      </main>
 
-        <footer class="app-footer">
-            <p>{{ app_version }} &mdash; MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
-        </footer>
+      <footer class="app-footer">
+        <p>{{ app_version }} &mdash; MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
+      </footer>
     </div>
+  </div>
 
-    <script>
-        // Auto-focus and format the input
-        document.getElementById('code').addEventListener('input', function(e) {
-            // Remove any non-numeric characters
-            e.target.value = e.target.value.replace(/\D/g, '');
-            
-            // Auto-submit when 6 digits are entered
-            if (e.target.value.length === 6) {
-                setTimeout(() => {
-                    e.target.form.submit();
-                }, 500);
-            }
-        });
-
-        // Add visual feedback for typing
-        document.getElementById('code').addEventListener('keydown', function(e) {
-            // Allow backspace, delete, tab, escape, enter
-            if ([8, 9, 27, 13, 46].indexOf(e.keyCode) !== -1 ||
-                // Allow Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
-                (e.keyCode === 65 && e.ctrlKey === true) ||
-                (e.keyCode === 67 && e.ctrlKey === true) ||
-                (e.keyCode === 86 && e.ctrlKey === true) ||
-                (e.keyCode === 88 && e.ctrlKey === true)) {
-                return;
-            }
-            // Ensure that it is a number and stop the keypress
-            if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
-                e.preventDefault();
-            }
-        });
-    </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script>
+    const codeInput = document.getElementById('twoFACode');
+    codeInput.addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/\D/g, '');
+      if (e.target.value.length === 6) {
+        document.getElementById('twoFAForm').submit();
+      }
+    });
+    codeInput.addEventListener('keydown', function(e) {
+      if ([8,9,27,13,46].indexOf(e.keyCode) !== -1 ||
+          (e.keyCode === 65 && e.ctrlKey) || (e.keyCode === 67 && e.ctrlKey) ||
+          (e.keyCode === 86 && e.ctrlKey) || (e.keyCode === 88 && e.ctrlKey)) return;
+      if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) e.preventDefault();
+    });
+  </script>
 </body>
 </html>

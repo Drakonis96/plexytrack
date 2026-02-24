@@ -5,93 +5,114 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PlexyTrack - Tracker Login</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
 </head>
 <body>
+  <div class="layout">
     <aside class="sidebar">
-        <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack Logo" class="logo">
-        <nav class="sidebar-nav">
-            <a href="{{ url_for('index') }}" class="nav-link">Sync</a>
-            <a href="{{ url_for('migration_page') }}" class="nav-link">Migration</a>
-            <a href="{{ url_for('backup_page') }}" class="nav-link">Backup</a>
-            <a href="{{ url_for('config_page') }}" class="nav-link active">Tracker Login</a>
-            <a href="{{ url_for('users_page') }}" class="nav-link">Plex Login</a>
-            <a href="{{ url_for('oauth_index') }}" class="nav-link">OAuth</a>
-            <button id="logoutBtn" class="btn-logout">Log Out</button>
-        </nav>
+      <div class="sidebar-brand">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="PlexyTrack" class="logo">
+        <span>PlexyTrack</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="{{ url_for('index') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M2.5 22v-6h6"/><path d="M22 11.5A10 10 0 0 0 3.2 7.2"/><path d="M2 12.5a10 10 0 0 0 18.8 4.3"/></svg>Sync</a>
+        <a href="{{ url_for('migration_page') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 16-4-4 4-4"/></svg>Migration</a>
+        <a href="{{ url_for('backup_page') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><polyline points="14 2 14 8 20 8"/><path d="m3 15 2 2 4-4"/><path d="m3 21 2-2"/></svg>Backup</a>
+        <a href="{{ url_for('config_page') }}" class="nav-link active"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Tracker Login</a>
+        <a href="{{ url_for('users_page') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Plex Login</a>
+        <a href="{{ url_for('oauth_index') }}" class="nav-link"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>OAuth</a>
+      </nav>
     </aside>
-    <div class="app-container">
-        <header class="app-header">
-            <button class="nav-toggle" id="navToggle">&#9776;</button>
-            <h1>PlexyTrack</h1>
-        </header>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="main-wrapper">
+      <header class="top-header">
+        <div class="top-header-left">
+          <button class="hamburger-btn" id="hamburgerBtn" aria-label="Toggle menu"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button>
+          <h1 class="page-title">Tracker Login</h1>
+        </div>
+        <div class="top-header-right">
+          <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme"><svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg><svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+          <button id="logoutBtn" class="btn-logout"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>Log Out</button>
+        </div>
+      </header>
 
-        <main class="content-area">
-            <section class="card">
-                <h2>Trakt</h2>
-                {% if trakt_configured %}
-                <div class="status-message success">Trakt configured</div>
-                {% else %}
-                <div class="status-message error">Trakt not configured</div>
-                {% endif %}
-                <a href="{{ url_for('authorize_service', service='trakt') }}" class="button primary" style="margin-top:10px;">Configure</a>
-                <form method="post" action="{{ url_for('clear_service', service='trakt') }}" class="stop-form">
-                    <button type="submit" class="button secondary">Clear Config</button>
-                </form>
-            </section>
+      <main class="content-area">
+        <section class="card">
+          <h2>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+            Trakt
+          </h2>
+          {% if trakt_configured %}
+          <div class="status-message success">Trakt configured</div>
+          {% else %}
+          <div class="status-message error">Trakt not configured</div>
+          {% endif %}
+          <div class="form-actions mt-3">
+            <a href="{{ url_for('authorize_service', service='trakt') }}" class="button primary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+              Configure
+            </a>
+          </div>
+          <form method="post" action="{{ url_for('clear_service', service='trakt') }}" class="stop-form">
+            <button type="submit" class="button secondary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              Clear Config
+            </button>
+          </form>
+        </section>
 
-            <section class="card">
-                <h2>Simkl</h2>
-                {% if simkl_configured %}
-                <div class="status-message success">Simkl configured</div>
-                {% else %}
-                <div class="status-message error">Simkl not configured</div>
-                {% endif %}
-                <a href="{{ url_for('authorize_service', service='simkl') }}" class="button primary" style="margin-top:10px;">Configure</a>
-                <form method="post" action="{{ url_for('clear_service', service='simkl') }}" class="stop-form">
-                    <button type="submit" class="button secondary">Clear Config</button>
-                </form>
-            </section>
+        <section class="card">
+          <h2>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></svg>
+            Simkl
+          </h2>
+          {% if simkl_configured %}
+          <div class="status-message success">Simkl configured</div>
+          {% else %}
+          <div class="status-message error">Simkl not configured</div>
+          {% endif %}
+          <div class="form-actions mt-3">
+            <a href="{{ url_for('authorize_service', service='simkl') }}" class="button primary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+              Configure
+            </a>
+          </div>
+          <form method="post" action="{{ url_for('clear_service', service='simkl') }}" class="stop-form">
+            <button type="submit" class="button secondary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              Clear Config
+            </button>
+          </form>
+        </section>
 
-            <section class="card">
-                <h2>Select Provider</h2>
-                <form method="post" class="provider-form">
-                    <div class="provider-toggle">
-                        <label>
-                            <input type="radio" name="provider" value="trakt" {% if provider == 'trakt' %}checked{% endif %}>
-                            Trakt
-                        </label>
-                        <label>
-                            <input type="radio" name="provider" value="none" {% if provider == 'none' %}checked{% endif %}>
-                            None
-                        </label>
-                        <label>
-                            <input type="radio" name="provider" value="simkl" {% if provider == 'simkl' %}checked{% endif %}>
-                            Simkl
-                        </label>
-                    </div>
-                    <div class="form-actions">
-                        <button type="submit" class="button primary">Save</button>
-                    </div>
-                </form>
-            </section>
-        </main>
+        <section class="card">
+          <h2>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6"/><path d="M12 17v6"/><path d="m5.6 5.6 4.25 4.25"/><path d="m14.15 14.15 4.25 4.25"/><path d="M1 12h6"/><path d="M17 12h6"/><path d="m5.6 18.4 4.25-4.25"/><path d="m14.15 9.85 4.25-4.25"/></svg>
+            Select Provider
+          </h2>
+          <form method="post" class="provider-form">
+            <div class="provider-toggle">
+              <label><input type="radio" name="provider" value="trakt" {% if provider == 'trakt' %}checked{% endif %}> Trakt</label>
+              <label><input type="radio" name="provider" value="none" {% if provider == 'none' %}checked{% endif %}> None</label>
+              <label><input type="radio" name="provider" value="simkl" {% if provider == 'simkl' %}checked{% endif %}> Simkl</label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button primary">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+                Save
+              </button>
+            </div>
+          </form>
+        </section>
+      </main>
 
-        <footer class="app-footer">
-            <p>{{ app_version }} &mdash; MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
-        </footer>
+      <footer class="app-footer">
+        <p>{{ app_version }} &mdash; MIT License. By <a href="https://github.com/Drakonis96" target="_blank" rel="noopener">Drakonis96</a></p>
+      </footer>
     </div>
-
-    <script src="{{ url_for('static', filename='logout.js') }}"></script>
-    <script>
-        const msgs = document.querySelectorAll('.status-message');
-        msgs.forEach(msg => {
-            if (msg.textContent.trim() !== '') {
-                setTimeout(function() { msg.style.display = 'none'; }, 5000);
-            }
-        });
-    </script>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
