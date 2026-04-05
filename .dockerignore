@@ -49,7 +49,6 @@ phase*.json
 real_tri_sync_battery.py
 test_real_sync.py
 test_timestamp_fix.py
-.env
 
 # Database files
 *.db
@@ -68,4 +67,7 @@ Dockerfile
 
 # Unraid template
 unraid-template/
+
+# Backup directory
+Backup/
 

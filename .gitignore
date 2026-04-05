@@ -46,6 +46,13 @@ plex_sync_state.json
 # Backups of old UI files
 *.bak
 
+# Database files
+*.db
+*.sqlite3
+
+# Backup directory
+Backup/
+
 # Development / test data (personal)
 phase*.json
 real_tri_sync_battery.py
