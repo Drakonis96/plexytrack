@@ -341,9 +341,15 @@ def get_simkl_history(
     )
     data = resp.json()
     if data and isinstance(data, dict):
-        # Completed movies
-        completed_movies = data.get("movies", [])
-        for movie_item in completed_movies:
+        # Only include movies that are actually watched (completed/watching).
+        # The /sync/all-items endpoint returns ALL list statuses including
+        # "plantowatch", "hold", and "dropped" which must be excluded to
+        # avoid incorrectly marking unwatched items as watched in Plex.
+        _WATCHED_STATUSES = {"completed", "watching"}
+        all_movies = data.get("movies", [])
+        for movie_item in all_movies:
+            if movie_item.get("list", "") not in _WATCHED_STATUSES:
+                continue
             m = movie_item.get("movie", {})
             guid = simkl_movie_key(m)
             if not guid:
@@ -356,9 +362,11 @@ def get_simkl_history(
                     watched_at,
                 )
 
-        # Completed episodes from shows
-        completed_shows = data.get("shows", [])
-        for show_item in completed_shows:
+        # Only include episodes from shows that are completed or watching
+        all_shows = data.get("shows", [])
+        for show_item in all_shows:
+            if show_item.get("list", "") not in _WATCHED_STATUSES:
+                continue
             show = show_item.get("show", {})
             seasons = show_item.get("seasons", [])
             for season in seasons:
