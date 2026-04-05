@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.9 (2026-04-05)
+
+### Bug Fixes
+
+- **Fixed Plan to Watch movies being marked as watched in Plex**: The Simkl `/sync/all-items` endpoint returns items from all list statuses (plantowatch, watching, completed, hold, dropped). The sync logic was treating every returned item as watched without checking the status field, causing Plan to Watch, On Hold, and Dropped movies and shows to be incorrectly marked as watched in Plex. Now only items with status `completed` or `watching` are included in the watched history.
+- **Fixed incorrect Simkl API field name for list status**: The Simkl API returns the watchlist status in a field called `status` (not `list` as suggested by some API docs). The filter now checks `status` with `list` as a fallback for robustness.
+- **Synchronized version strings**: All `APP_VERSION` constants across `app.py`, `simkl_utils.py`, and `trakt_utils.py` are now consistent.
+
+### Maintenance
+
+- **Synced .gitignore and .dockerignore**: Added missing `*.db`, `*.sqlite3`, and `Backup/` entries to `.gitignore`. Removed duplicate `.env` entry from `.dockerignore`.
+- **Added comprehensive test suite for plan-to-watch filtering**: 41 tests covering all list statuses, ID types (IMDB, TMDB, TVDB, anidb), full seasons, anime, mixed responses, edge cases, and field name fallback.
+
 ## v0.4.8 (2026-02-24)
 
 ### New Features
