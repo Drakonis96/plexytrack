@@ -348,7 +348,8 @@ def get_simkl_history(
         _WATCHED_STATUSES = {"completed", "watching"}
         all_movies = data.get("movies", [])
         for movie_item in all_movies:
-            if movie_item.get("list", "") not in _WATCHED_STATUSES:
+            item_status = movie_item.get("status") or movie_item.get("list") or ""
+            if item_status not in _WATCHED_STATUSES:
                 continue
             m = movie_item.get("movie", {})
             guid = simkl_movie_key(m)
@@ -365,7 +366,8 @@ def get_simkl_history(
         # Only include episodes from shows that are completed or watching
         all_shows = data.get("shows", [])
         for show_item in all_shows:
-            if show_item.get("list", "") not in _WATCHED_STATUSES:
+            item_status = show_item.get("status") or show_item.get("list") or ""
+            if item_status not in _WATCHED_STATUSES:
                 continue
             show = show_item.get("show", {})
             seasons = show_item.get("seasons", [])
