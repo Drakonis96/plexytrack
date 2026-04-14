@@ -47,6 +47,17 @@ from getpass import getpass
 # updated base URL.
 MyPlexAccount.METADATA = MyPlexAccount.DISCOVER
 
+# By default PlexAPI parses Plex timestamps with no timezone info
+# (DATETIME_TIMEZONE = None), returning naive datetimes in the *local*
+# system timezone via datetime.fromtimestamp().  Our code saves the last
+# sync timestamp in UTC (via datetime.utcnow()), so comparing a local
+# naive datetime against a UTC timestamp gives wrong results in non-UTC
+# environments.  Setting DATETIME_TIMEZONE = timezone.utc makes PlexAPI
+# always return UTC-aware datetimes, which to_iso_z() already handles
+# correctly.
+import plexapi.utils as _plexapi_utils
+_plexapi_utils.DATETIME_TIMEZONE = timezone.utc
+
 from utils import (
     to_iso_z,
     normalize_year,
