@@ -39,6 +39,7 @@ from threading import Event, Lock, Thread
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount
 from plexapi.exceptions import BadRequest, NotFound
+import plexapi.utils as _plexapi_utils
 from getpass import getpass
 
 # Plex moved watchlist and other account endpoints from the old
@@ -55,7 +56,6 @@ MyPlexAccount.METADATA = MyPlexAccount.DISCOVER
 # environments.  Setting DATETIME_TIMEZONE = timezone.utc makes PlexAPI
 # always return UTC-aware datetimes, which to_iso_z() already handles
 # correctly.
-import plexapi.utils as _plexapi_utils
 _plexapi_utils.DATETIME_TIMEZONE = timezone.utc
 
 from utils import (
