@@ -3,6 +3,7 @@
   <Name>PlexyTrack</Name>
   <Repository>drakonis96/plexytrack</Repository>
   <Registry>https://hub.docker.com/r/drakonis96/plexytrack</Registry>
+  <Maintainer>Drakonis96</Maintainer>
   <Branch>
     <Tag>latest</Tag>
     <TagDescription>Latest stable release</TagDescription>
@@ -11,17 +12,14 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/Drakonis96/plexytrack/issues</Support>
   <Project>https://github.com/Drakonis96/plexytrack</Project>
-  <Overview>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. It supports bidirectional sync of watched history, ratings, collections, liked lists and watchlists. A simple web UI lets you configure sync options, select Plex users, and create backups of your data. Live Sync via Plex webhooks is also available for instant updates.</Overview>
+  <ReadMe>https://github.com/Drakonis96/plexytrack/blob/main/README.md</ReadMe>
+  <TemplateURL>https://raw.githubusercontent.com/Drakonis96/plexytrack-unraid-template/main/plexytrack.xml</TemplateURL>
+  <Overview>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. It supports bidirectional sync of watched history, ratings, collections, liked lists and watchlists. A simple web UI lets you configure sync options, select Plex users, and create backups of your data. Live Sync via Plex webhooks is also available for instant updates. After installing the container, open the WebUI to authenticate Plex and then connect Trakt and/or Simkl.</Overview>
   <Category>MediaApp:Other</Category>
   <WebUI>http://[IP]:[PORT:5030]</WebUI>
   <Icon>https://raw.githubusercontent.com/Drakonis96/plexytrack/main/static/logo2.png</Icon>
-  <Description>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. It supports bidirectional sync of watched history, ratings, collections, liked lists and watchlists. A simple web UI lets you configure sync options, select Plex users, and create backups of your data.</Description>
-  <DonateText/>
-  <DonateLink/>
-  <DonateImg/>
   <ExtraSearchTerms>plex trakt simkl sync media tracker</ExtraSearchTerms>
-  <Requires>Plex Media Server and a Trakt and/or Simkl account with API credentials.</Requires>
-  <Changes>https://github.com/Drakonis96/plexytrack/blob/main/CHANGELOG.md</Changes>
+  <Requires>Plex Media Server and at least one configured provider: Trakt or Simkl. Plex base URL is required. Plex token is optional if you plan to authenticate through the WebUI after install.</Requires>
 
   <!-- Port -->
   <Config
@@ -39,24 +37,24 @@
   <Config
     Name="Config Directory"
     Target="/config"
-    Default="/mnt/user/appdata/plexytrack/config"
+    Default="/mnt/cache/appdata/plexytrack/config"
     Mode="rw"
     Description="Path to store PlexyTrack configuration files (tokens, settings)."
     Type="Path"
     Display="always"
     Required="true"
-    Mask="false">/mnt/user/appdata/plexytrack/config</Config>
+    Mask="false">/mnt/cache/appdata/plexytrack/config</Config>
 
   <Config
     Name="State Directory"
     Target="/state"
-    Default="/mnt/user/appdata/plexytrack/state"
+    Default="/mnt/cache/appdata/plexytrack/state"
     Mode="rw"
     Description="Path to store PlexyTrack sync state files."
     Type="Path"
     Display="always"
     Required="true"
-    Mask="false">/mnt/user/appdata/plexytrack/state</Config>
+    Mask="false">/mnt/cache/appdata/plexytrack/state</Config>
 
   <!-- Required Environment Variables -->
   <Config
@@ -73,10 +71,10 @@
     Name="Plex Token"
     Target="PLEX_TOKEN"
     Default=""
-    Description="Your Plex authentication token. See: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/"
+    Description="Optional Plex authentication token. Leave empty if you plan to authenticate Plex from the WebUI after install."
     Type="Variable"
     Display="always"
-    Required="true"
+    Required="false"
     Mask="true"/>
 
   <!-- Trakt -->
