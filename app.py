@@ -129,7 +129,7 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.9"
+APP_VERSION = "v0.4.10"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -585,7 +585,10 @@ def to_iso_z(value) -> Optional[str]:
 
     if isinstance(value, datetime):  # datetime / pendulum / arrow
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            # PlexAPI creates naive datetimes in the system's local timezone
+            # via datetime.fromtimestamp().  Use astimezone() so Python treats
+            # them as local time and converts to UTC correctly.
+            value = value.astimezone(timezone.utc)
         return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     if isinstance(value, Number):  # int / float

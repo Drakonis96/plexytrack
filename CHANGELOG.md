@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.10 (2026-04-20)
+
+### Bug Fixes
+
+- **Fixed incremental Plex history sync in non-UTC timezones**: Naive `viewedAt` datetimes returned by PlexAPI were being stamped as UTC instead of converted from the container's local timezone. This shifted recent watches backwards by the local UTC offset and caused incremental history syncs to return 0 new items after the initial full sync.
+
+### Tests
+
+- **Added regression coverage for naive Plex timestamps**: Added a test that verifies naive local datetimes are converted to the correct UTC timestamp before incremental sync comparisons.
+
 ## v0.4.9 (2026-04-05)
 
 ### Bug Fixes

@@ -14,7 +14,10 @@ def to_iso_z(value) -> Optional[str]:
 
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            # PlexAPI creates naive datetimes in the system's local timezone
+            # via datetime.fromtimestamp().  Use astimezone() so Python treats
+            # them as local time and converts to UTC correctly.
+            value = value.astimezone(timezone.utc)
         return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     if isinstance(value, Number):

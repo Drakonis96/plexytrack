@@ -15,6 +15,7 @@ Tests for the new sync features implemented in PlexyTrack:
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
@@ -24,7 +25,7 @@ import pytest
 # Ensure the project root is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import safe_timestamp_compare
+from utils import safe_timestamp_compare, to_iso_z
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -652,6 +653,27 @@ class TestSafeTimestampCompare:
 
     def test_with_milliseconds(self):
         assert safe_timestamp_compare("2025-06-15T12:00:00.500Z", "2025-06-15T12:00:00.000Z") is True
+
+
+class TestToIsoZ:
+    """Tests for to_iso_z."""
+
+    def test_naive_datetime_is_converted_from_local_timezone_to_utc(self):
+        if not hasattr(time, "tzset"):
+            pytest.skip("tzset is not available on this platform")
+
+        original_tz = os.environ.get("TZ")
+        try:
+            os.environ["TZ"] = "America/Santiago"
+            time.tzset()
+
+            assert to_iso_z(datetime(2026, 4, 13, 17, 30, 0)) == "2026-04-13T21:30:00Z"
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
