@@ -77,9 +77,8 @@ If you want to remove saved tokens, the Config page also provides **Clear Config
 
 All sync options and the chosen Plex user are saved to `settings.json` and
 `selected_user.json` so your configuration persists across restarts.
-When running PlexyTrack in Docker, mount a host directory and set
-`PLEXYTRACK_DATA_DIR` to that path (for example `/data`) so the tokens and
-settings survive container re-creation.
+When running PlexyTrack in Docker, mount host directories for `/config` and
+`/state` so tokens, settings, and sync state survive container re-creation.
 
 
 When specifying a custom redirect URI for either service, ensure the same
@@ -230,12 +229,13 @@ SIMKL_CLIENT_SECRET=YOUR_SIMKL_CLIENT_SECRET
 # SIMKL_REDIRECT_URI=http://localhost:5030/oauth/simkl
 
 TZ=Europe/Madrid
-# Directory to store tokens and settings
-PLEXYTRACK_DATA_DIR=/data
+# Directories to store tokens, settings, and sync state
+PLEXYTRACK_CONFIG_DIR=/config
+PLEXYTRACK_STATE_DIR=/state
 ```
 
-Make sure a `data/` folder exists next to the compose file so the container can
-persist its configuration.
+Make sure `config/` and `state/` folders exist next to the compose file so the
+container can persist its configuration and sync state.
 
 3. Start the application using Docker Compose. The default `docker-compose.yml`
    pulls the image from Docker Hub:
@@ -290,5 +290,4 @@ Below are a few images of the PlexyTrack web interface.
   <img src="screenshots/Screenshot%203.png" alt="Screenshot 3" width="400" />
   <img src="screenshots/Screenshot%204.png" alt="Screenshot 4" width="400" />
 </p>
-
 

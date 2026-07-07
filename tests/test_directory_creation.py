@@ -24,3 +24,22 @@ def test_creates_dirs_and_fails_without_bind_mount(tmp_path):
     assert config_dir.is_dir()
     assert state_dir.is_dir()
     assert "must be a mounted volume" in result.stderr
+
+
+def test_empty_directory_env_vars_fall_back_to_container_defaults():
+    env = os.environ.copy()
+    env["PLEXYTRACK_CONFIG_DIR"] = ""
+    env["PLEXYTRACK_STATE_DIR"] = ""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import app; print(app.CONFIG_DIR); print(app.STATE_DIR)",
+        ],
+        env=env,
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.splitlines() == ["/config", "/state"]

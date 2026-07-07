@@ -129,7 +129,7 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.10"
+APP_VERSION = "v0.4.11"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -162,8 +162,8 @@ SYNC_WATCHLISTS = False
 LIVE_SYNC = False
 SYNC_PROVIDER = "none"  # trakt | simkl | none
 
-CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
-STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
+CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR") or "/config"
+STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR") or "/state"
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 PROVIDER_FILE = os.path.join(CONFIG_DIR, "provider.json")

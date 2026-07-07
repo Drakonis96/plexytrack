@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.11 (2026-07-07)
+
+### Bug Fixes
+
+- **Fixed Docker Compose startup with missing directory variables**: Compose now falls back to `/config` and `/state` when `PLEXYTRACK_CONFIG_DIR` or `PLEXYTRACK_STATE_DIR` are not set.
+- **Hardened startup against empty directory variables**: Empty `PLEXYTRACK_CONFIG_DIR` and `PLEXYTRACK_STATE_DIR` values now fall back to the container defaults instead of crashing on `os.makedirs("")`.
+
+### Documentation
+
+- **Updated Docker Compose directory setup**: The README now documents `PLEXYTRACK_CONFIG_DIR` and `PLEXYTRACK_STATE_DIR` instead of the unused `PLEXYTRACK_DATA_DIR`.
+
 ## v0.4.10 (2026-04-20)
 
 ### Bug Fixes
