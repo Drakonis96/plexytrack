@@ -1166,7 +1166,7 @@ def sync_watchlists_only(
     # Allow standalone execution without pre-initialized clients
     if plex is None or headers is None:
         logger.debug("Initializing clients for standalone watchlist sync...")
-        if SYNC_PROVIDER != "trakt":
+        if SYNC_PROVIDER not in ("trakt", "both"):
             logger.warning("Watchlist sync is only supported with Trakt provider.")
             return
         reset_cache()
@@ -1276,13 +1276,65 @@ def _trakt_cat_changed(current, previous, category, key) -> bool:
     return should_sync_category(current, prev_ts, category, key)
 
 
+def _resolve_dual_providers():
+    """Return the ordered list of providers to run in dual mode.
+
+    Only providers with an available access token are included, so a partially
+    configured "both" selection degrades gracefully to whatever is connected.
+    """
+    load_trakt_tokens()
+    load_simkl_tokens()
+    providers = []
+    if os.environ.get("TRAKT_ACCESS_TOKEN"):
+        providers.append("trakt")
+    if os.environ.get("SIMKL_ACCESS_TOKEN"):
+        providers.append("simkl")
+    return providers
+
+
+def _sync_dual():
+    """Run the full sync pipeline against Trakt and Simkl in a single pass.
+
+    The Plex "last sync" window is frozen up front and only advanced once every
+    provider has finished, so neither provider consumes the other's incremental
+    window. Each provider pass is fully isolated: a failure in one is logged and
+    the next provider still runs.
+    """
+    providers = _resolve_dual_providers()
+    if not providers:
+        logger.error("Dual-provider sync selected but no Trakt/Simkl tokens are available.")
+        return
+
+    frozen_last_sync = load_last_plex_sync()
+    logger.info("Dual-provider sync starting for: %s", ", ".join(providers))
+    for prov in providers:
+        if stop_event.is_set():
+            logger.info("Dual sync cancelled before %s pass", prov)
+            return
+        logger.info("──── Dual sync pass: %s ────", prov)
+        try:
+            _sync_inner(provider=prov, shared_last_sync=frozen_last_sync, defer_save=True)
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+            logger.error("Dual sync pass for %s crashed: %s", prov, exc)
+            logger.error("Traceback: %s", traceback.format_exc())
+
+    # Advance the shared Plex window only after both providers are done.
+    if SYNC_WATCHED and not stop_event.is_set():
+        save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
+    logger.info("Dual-provider sync finished.")
+
+
 def sync():
     """Run the main synchronization logic with selected user."""
     if not _sync_lock.acquire(blocking=False):
         logger.warning("Sync already in progress, skipping this run")
         return
     try:
-        _sync_inner()
+        if SYNC_PROVIDER == "both":
+            _sync_dual()
+        else:
+            _sync_inner()
     except Exception as exc:
         import traceback
         logger.error("Sync crashed with unhandled exception: %s", exc)
@@ -1291,8 +1343,17 @@ def sync():
         _sync_lock.release()
 
 
-def _sync_inner():
-    """Internal sync logic (called under _sync_lock)."""
+def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
+    """Internal sync logic (called under _sync_lock).
+
+    ``provider`` overrides the globally-selected provider for this pass (used by
+    dual-provider mode to run once for Trakt and once for Simkl). When
+    ``shared_last_sync`` is supplied it is used instead of loading the persisted
+    value, and ``defer_save`` suppresses advancing the persisted "last sync"
+    timestamp – both let :func:`_sync_dual` freeze a single Plex window across
+    providers and only advance it after every provider has finished.
+    """
+    active_provider = provider if provider is not None else SYNC_PROVIDER
     if stop_event.is_set():
         logger.info("Sync aborted before start")
         return
@@ -1327,7 +1388,7 @@ def _sync_inner():
     simkl_enabled = load_simkl_tokens()
 
     headers = {}
-    if SYNC_PROVIDER == "trakt" and trakt_enabled:
+    if active_provider == "trakt" and trakt_enabled:
         if not refresh_trakt_token():
             logger.error("Failed to refresh Trakt token. Aborting sync.")
             return
@@ -1338,7 +1399,7 @@ def _sync_inner():
             "trakt-api-version": "2",
             "trakt-api-key": os.environ["TRAKT_CLIENT_ID"],
         }
-    elif SYNC_PROVIDER == "simkl" and simkl_enabled:
+    elif active_provider == "simkl" and simkl_enabled:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {os.environ.get('SIMKL_ACCESS_TOKEN')}",
@@ -1353,10 +1414,10 @@ def _sync_inner():
     trakt_activities = None
     prev_trakt_activities = {}
     simkl_activities = None
-    if SYNC_PROVIDER == "trakt" and headers:
+    if active_provider == "trakt" and headers:
         trakt_activities = get_trakt_last_activities(headers)
         prev_trakt_activities = load_trakt_activities()
-    elif SYNC_PROVIDER == "simkl" and headers:
+    elif active_provider == "simkl" and headers:
         simkl_activities = get_simkl_last_activities(headers)
 
     # Get history for the selected user
@@ -1366,8 +1427,10 @@ def _sync_inner():
         return
 
     try:
-        # Load lastSync once so both Plex and Trakt use the same window
-        last_sync = load_last_plex_sync()
+        # Load lastSync once so both Plex and Trakt use the same window. In
+        # dual-provider mode the caller freezes this window and passes it in so
+        # every provider sees the same incremental range.
+        last_sync = shared_last_sync if shared_last_sync is not None else load_last_plex_sync()
         is_incremental = last_sync is not None
 
         # Trakt truncates watched_at to the nearest minute, so we subtract a
@@ -1381,7 +1444,7 @@ def _sync_inner():
             except Exception:
                 trakt_date_from = last_sync
 
-        if SYNC_PROVIDER == "trakt":
+        if active_provider == "trakt":
             logger.info("Provider: Trakt")
             try:
                 # Use incremental Trakt fetch when lastSync exists so that
@@ -1550,7 +1613,7 @@ def _sync_inner():
                     logger.info("Skipping bidirectional sync for managed user %s: %d movies and %d episodes would have been synced from Trakt to Plex",
                                selected_user["username"], len(missing_movies), len(missing_episodes))
 
-        elif SYNC_PROVIDER == "simkl":
+        elif active_provider == "simkl":
             logger.info("Provider: Simkl")
             simkl_movies, simkl_episodes = get_simkl_history(
                 headers, date_from=last_sync
@@ -1725,7 +1788,7 @@ def _sync_inner():
 
     # Ratings sync
     if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
-        if SYNC_PROVIDER == "trakt":
+        if active_provider == "trakt":
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
@@ -1733,7 +1796,7 @@ def _sync_inner():
                 sync_ratings(sync_plex, headers)
             except Exception as exc:
                 logger.error("Ratings sync (Plex -> Trakt) failed: %s", exc)
-        elif SYNC_PROVIDER == "simkl":
+        elif active_provider == "simkl":
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
@@ -1743,7 +1806,7 @@ def _sync_inner():
                 logger.error("Ratings sync (Plex -> Simkl) failed: %s", exc)
 
     if SYNC_RATINGS and RATINGS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
-        if SYNC_PROVIDER == "trakt" and selected_user.get("is_owner", False):
+        if active_provider == "trakt" and selected_user.get("is_owner", False):
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
@@ -1760,7 +1823,7 @@ def _sync_inner():
                     apply_trakt_ratings(sync_plex, headers)
                 except Exception as exc:
                     logger.error("Ratings sync (Trakt -> Plex) failed: %s", exc)
-        elif SYNC_PROVIDER == "simkl" and selected_user.get("is_owner", False):
+        elif active_provider == "simkl" and selected_user.get("is_owner", False):
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
@@ -1775,7 +1838,7 @@ def _sync_inner():
                 except Exception as exc:
                     logger.error("Ratings sync (Simkl -> Plex) failed: %s", exc)
 
-    if SYNC_WATCHLISTS and SYNC_PROVIDER == "trakt":
+    if SYNC_WATCHLISTS and active_provider == "trakt":
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
@@ -1800,7 +1863,7 @@ def _sync_inner():
             logger.error("Watchlist sync failed: %s", exc)
 
         mirror_trakt_watchlist_to_simkl(headers)
-    elif SYNC_WATCHLISTS and SYNC_PROVIDER == "simkl":
+    elif SYNC_WATCHLISTS and active_provider == "simkl":
         logger.warning("Watchlist sync with Simkl is not yet supported.")
 
     if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
@@ -1813,7 +1876,7 @@ def _sync_inner():
             logger.error("Collection sync failed: %s", exc)
 
     if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
-        if SYNC_PROVIDER == "trakt":
+        if active_provider == "trakt":
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
@@ -1829,10 +1892,10 @@ def _sync_inner():
                     import_trakt_collection(sync_plex, headers)
                 except Exception as exc:
                     logger.error("Collection import (Trakt -> Plex) failed: %s", exc)
-        elif SYNC_PROVIDER == "simkl":
+        elif active_provider == "simkl":
             logger.warning("Collection import from Simkl is not supported.")
 
-    if SYNC_LIKED_LISTS and SYNC_PROVIDER == "trakt":
+    if SYNC_LIKED_LISTS and active_provider == "trakt":
         if stop_event.is_set():
             logger.info("Sync cancelled")
             return
@@ -1852,10 +1915,10 @@ def _sync_inner():
             logger.error("Liked-lists sync skipped: %s", exc)
         except Exception as exc:
             logger.error("Liked-lists sync failed: %s", exc)
-    elif SYNC_LIKED_LISTS and SYNC_PROVIDER == "simkl":
+    elif SYNC_LIKED_LISTS and active_provider == "simkl":
         logger.warning("Liked lists sync with Simkl is not yet supported.")
 
-    if SYNC_WATCHED:
+    if SYNC_WATCHED and not defer_save:
         save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
 
     # Persist the activity snapshot so the next run can skip unchanged
@@ -2190,9 +2253,11 @@ def disconnect_service():
         os.environ.pop("TRAKT_ACCESS_TOKEN", None)
         os.environ.pop("TRAKT_REFRESH_TOKEN", None)
         os.environ.pop("TRAKT_EXPIRES_AT", None)
-        # Reset provider if it was trakt
+        # Reset provider if it was trakt; in dual mode fall back to Simkl.
         if SYNC_PROVIDER == "trakt":
             save_provider("none")
+        elif SYNC_PROVIDER == "both":
+            save_provider("simkl")
         logger.info("Disconnected from Trakt and wiped all Trakt tokens")
         return jsonify({"success": True, "message": "Disconnected from Trakt."})
 
@@ -2203,9 +2268,11 @@ def disconnect_service():
         save_auth(auth)
         # Clear env vars
         os.environ.pop("SIMKL_ACCESS_TOKEN", None)
-        # Reset provider if it was simkl
+        # Reset provider if it was simkl; in dual mode fall back to Trakt.
         if SYNC_PROVIDER == "simkl":
             save_provider("none")
+        elif SYNC_PROVIDER == "both":
+            save_provider("trakt")
         logger.info("Disconnected from Simkl and wiped all Simkl tokens")
         return jsonify({"success": True, "message": "Disconnected from Simkl."})
 
@@ -2601,6 +2668,8 @@ def config_page():
     load_settings()
     if request.method == "POST":
         provider = request.form.get("provider", "none")
+        if provider not in ("none", "trakt", "simkl", "both"):
+            provider = "none"
         save_provider(provider)
         if provider == "none":
             stop_scheduler()
@@ -2685,6 +2754,8 @@ def clear_service(service: str):
         logger.info("Removed Trakt tokens")
         if SYNC_PROVIDER == "trakt":
             save_provider("none")
+        elif SYNC_PROVIDER == "both":
+            save_provider("simkl")
     elif service == "simkl":
         os.environ.pop("SIMKL_ACCESS_TOKEN", None)
         auth = load_auth()
@@ -2693,6 +2764,8 @@ def clear_service(service: str):
         logger.info("Removed Simkl token")
         if SYNC_PROVIDER == "simkl":
             save_provider("none")
+        elif SYNC_PROVIDER == "both":
+            save_provider("trakt")
     else:
         return jsonify({"success": False, "error": "Unknown service"})
     return redirect(url_for("config_page"))
@@ -2880,7 +2953,7 @@ def plex_webhook():
         # Trigger a one-off sync immediately
         stop_event.clear()
 
-        if SYNC_PROVIDER == "simkl":
+        if SYNC_PROVIDER in ("simkl", "both"):
             client_id = os.environ.get("SIMKL_CLIENT_ID")
             token = os.environ.get("SIMKL_ACCESS_TOKEN")
             if client_id and token:
@@ -3417,10 +3490,10 @@ def test_connections() -> bool:
 
     trakt_token = os.environ.get("TRAKT_ACCESS_TOKEN")
     trakt_client_id = os.environ.get("TRAKT_CLIENT_ID")
-    trakt_enabled = SYNC_PROVIDER == "trakt" and bool(trakt_token and trakt_client_id)
+    trakt_enabled = SYNC_PROVIDER in ("trakt", "both") and bool(trakt_token and trakt_client_id)
     simkl_token = os.environ.get("SIMKL_ACCESS_TOKEN")
     simkl_client_id = os.environ.get("SIMKL_CLIENT_ID")
-    simkl_enabled = SYNC_PROVIDER == "simkl" and bool(simkl_token and simkl_client_id)
+    simkl_enabled = SYNC_PROVIDER in ("simkl", "both") and bool(simkl_token and simkl_client_id)
 
     # Require token and base URL for Plex connection
     if not plex_token or not plex_baseurl:
