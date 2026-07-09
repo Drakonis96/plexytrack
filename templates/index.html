@@ -46,6 +46,10 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
           Settings
         </a>
+        <a href="{{ url_for('logs_page') }}" class="nav-link">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+          Logs
+        </a>
       </nav>
     </aside>
 
@@ -81,6 +85,37 @@
           </h2>
           <div id="selectedUserInfo" class="selected-user-info">
             <div class="loading-message">Loading user information...</div>
+          </div>
+        </section>
+
+        <!-- Sync Status -->
+        <section class="sync-status-card card">
+          <h2>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Sync Status
+            <span id="syncBadge" class="sync-badge idle" style="margin-left:auto"><span class="dot"></span><span id="syncBadgeText">Loading…</span></span>
+          </h2>
+          <div class="sync-status-grid">
+            <div class="sync-status-item">
+              <span class="label">Scheduled sync</span>
+              <span class="value" id="ssScheduled">—</span>
+              <span class="value sub" id="ssInterval"></span>
+            </div>
+            <div class="sync-status-item">
+              <span class="label">Next run</span>
+              <span class="value" id="ssNextRun">—</span>
+              <span class="value sub" id="ssNextRunRel"></span>
+            </div>
+            <div class="sync-status-item">
+              <span class="label">Last run started</span>
+              <span class="value" id="ssStarted">—</span>
+              <span class="value sub" id="ssTrigger"></span>
+            </div>
+            <div class="sync-status-item">
+              <span class="label">Last run finished</span>
+              <span class="value" id="ssFinished">—</span>
+              <span class="value sub" id="ssResult"></span>
+            </div>
           </div>
         </section>
 
@@ -175,10 +210,6 @@
             </button>
           </form>
         </section>
-
-        {% if next_run %}
-        <div class="status-message info">Next sync scheduled for: {{ next_run }}</div>
-        {% endif %}
 
         <div id="confirmationMessage" class="status-message {% if mtype == 'success' %}success{% elif mtype == 'stopped' %}error{% elif mtype == 'error' %}error{% endif %}" {% if not message %}style="display:none;"{% endif %}>
           {{ message }}
@@ -290,11 +321,113 @@
       }
     }
 
+    /* ---- Live Sync Status ---- */
+    function fmtDateTime(iso) {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    }
+
+    function fmtRelative(iso, serverNow) {
+      if (!iso) return '';
+      const target = new Date(iso).getTime();
+      const now = serverNow ? new Date(serverNow).getTime() : Date.now();
+      if (isNaN(target)) return '';
+      let diff = Math.round((target - now) / 1000);
+      const future = diff >= 0;
+      diff = Math.abs(diff);
+      let text;
+      if (diff < 60) text = diff + 's';
+      else if (diff < 3600) text = Math.floor(diff / 60) + 'm ' + (diff % 60) + 's';
+      else if (diff < 86400) text = Math.floor(diff / 3600) + 'h ' + Math.floor((diff % 3600) / 60) + 'm';
+      else text = Math.floor(diff / 86400) + 'd';
+      return future ? 'in ' + text : text + ' ago';
+    }
+
+    function setBadge(state, text) {
+      const badge = document.getElementById('syncBadge');
+      badge.className = 'sync-badge ' + state;
+      document.getElementById('syncBadgeText').textContent = text;
+    }
+
+    async function loadSyncStatus() {
+      try {
+        const res = await fetch('/api/sync_status');
+        if (!res.ok) return;
+        const s = await res.json();
+
+        // Badge
+        if (s.running) {
+          const mode = s.mode === 'watchlist' ? 'Watchlist sync' : 'Sync';
+          setBadge('running', mode + ' running…');
+        } else if (s.result === 'error') {
+          setBadge('error', 'Last run failed');
+        } else if (s.scheduled) {
+          setBadge('scheduled', 'Scheduled');
+        } else {
+          setBadge('idle', 'Idle');
+        }
+
+        // Scheduled / interval
+        document.getElementById('ssScheduled').textContent = s.scheduled ? 'Active' : 'Not scheduled';
+        document.getElementById('ssInterval').textContent =
+          s.scheduled && s.interval_minutes ? 'Every ' + s.interval_minutes + ' min' : '';
+
+        // Next run
+        const nextEl = document.getElementById('ssNextRun');
+        const nextRelEl = document.getElementById('ssNextRunRel');
+        if (s.scheduled && s.next_run) {
+          nextEl.textContent = fmtDateTime(s.next_run);
+          nextRelEl.textContent = s.running ? 'waiting for current run' : fmtRelative(s.next_run, s.server_time);
+        } else {
+          nextEl.textContent = '—';
+          nextRelEl.textContent = '';
+        }
+
+        // Last run started / trigger
+        const startedEl = document.getElementById('ssStarted');
+        const triggerEl = document.getElementById('ssTrigger');
+        if (s.started_at) {
+          startedEl.textContent = fmtDateTime(s.started_at);
+          const trig = s.trigger === 'once' ? 'Manual (Sync Once)'
+            : s.trigger === 'live' ? 'Live (webhook)'
+            : s.trigger === 'scheduled' ? 'Scheduled' : '';
+          triggerEl.textContent = trig ? 'Trigger: ' + trig : '';
+        } else {
+          startedEl.textContent = '—';
+          triggerEl.textContent = 'No run yet this session';
+        }
+
+        // Last run finished / result
+        const finishedEl = document.getElementById('ssFinished');
+        const resultEl = document.getElementById('ssResult');
+        if (s.running) {
+          finishedEl.textContent = 'In progress…';
+          resultEl.textContent = fmtRelative(s.started_at, s.server_time).replace(' ago', '') + ' elapsed';
+        } else if (s.finished_at) {
+          finishedEl.textContent = fmtDateTime(s.finished_at);
+          const label = s.result === 'success' ? '✓ Success'
+            : s.result === 'error' ? '✕ Error'
+            : s.result === 'stopped' ? '■ Stopped' : '';
+          resultEl.textContent = label;
+        } else {
+          finishedEl.textContent = '—';
+          resultEl.textContent = '';
+        }
+      } catch (e) { /* keep last known values */ }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
       loadSelectedUser();
       document.querySelectorAll('input[type="checkbox"][disabled]').forEach(cb => {
         cb.setAttribute('data-provider-disabled', 'true');
       });
+      loadSyncStatus();
+      setInterval(loadSyncStatus, 3000);
     });
 
     const msg = document.getElementById('confirmationMessage');

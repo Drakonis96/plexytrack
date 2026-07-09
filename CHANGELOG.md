@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.1 (2026-07-09)
+
+### Observability
+
+- **Live sync status** on the Sync page: shows whether a periodic sync is scheduled, the interval, and when the next run fires (absolute time + countdown). One-off ("Sync Once"), scheduled and webhook-triggered runs now report when they started, when they finished and the outcome (success / error / stopped), with a live status badge.
+- **New Logs page**: a read-only, real-time viewer of the application log stream in the sidebar. Logs are colour-coded by level, filterable (Debug/Info/Warning/Error), pausable, and auto-scroll. Backed by an in-memory ring buffer (size configurable via `PLEXYTRACK_LOG_BUFFER`, default 2000 lines) exposed through `/api/logs`; the sync state is exposed through `/api/sync_status`.
+
 ## v0.5.0 (2026-07-09)
 
 ### New sync connections (Plex ↔ Trakt ↔ Simkl)

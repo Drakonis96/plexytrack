@@ -20,6 +20,7 @@ The recommended sync interval is **at least 60 minutes**. Shorter intervals gene
 - **Discovery collections**: Trakt recommendations/trending/popular/anticipated and Simkl trending, materialized as dynamic Plex collections.
 - **Cross-service anime matching** via Simkl's MAL/AniDB id graph.
 - **Live Sync** mode to trigger updates immediately from Plex webhooks.
+- **Live sync status and logs**: the Sync page shows the scheduled interval, next run and the start/finish/outcome of each run, and a dedicated **Logs** page streams the application log in real time.
 - **Backup and restore** of your history, watchlist and ratings from the web interface.
 - **Hardened for public exposure** behind a reverse proxy (own login, CSRF, rate limiting, security headers, production WSGI server).
 - Intuitive UI for configuration and user selection.

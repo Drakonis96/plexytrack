@@ -14,6 +14,8 @@ import logging
 import secrets
 import hashlib
 import hmac
+import threading
+from collections import deque
 from datetime import datetime, timezone
 from numbers import Number
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -139,14 +141,72 @@ root_logger.setLevel(_LOG_LEVEL)
 for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
 
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(
-    logging.Formatter(
-        "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+_LOG_FORMATTER = logging.Formatter(
+    "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(_LOG_FORMATTER)
 root_logger.addHandler(console_handler)
+
+
+# In-memory ring buffer that mirrors the log stream so the web UI can display
+# recent activity live (see the "Logs" page). The buffer size is configurable
+# via PLEXYTRACK_LOG_BUFFER (number of most recent lines to keep).
+try:
+    _LOG_BUFFER_MAXLEN = max(100, int(os.environ.get("PLEXYTRACK_LOG_BUFFER", "2000")))
+except (TypeError, ValueError):
+    _LOG_BUFFER_MAXLEN = 2000
+
+
+class RingBufferLogHandler(logging.Handler):
+    """Keep the most recent log records in memory for the live Logs page.
+
+    Every stored entry carries a monotonically increasing ``id`` so the browser
+    can poll for only the records it has not seen yet. A lock guards the buffer
+    because records arrive from scheduler and sync worker threads as well as the
+    request threads.
+    """
+
+    def __init__(self, maxlen: int):
+        super().__init__()
+        self._buffer = deque(maxlen=maxlen)
+        self._lock = threading.Lock()
+        self._counter = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - never let logging raise
+            return
+        entry = {
+            "time": datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": message,
+        }
+        with self._lock:
+            self._counter += 1
+            entry["id"] = self._counter
+            self._buffer.append(entry)
+
+    def get_since(self, since_id: int, limit: Optional[int] = None):
+        """Return buffered entries with ``id`` greater than ``since_id``."""
+        with self._lock:
+            items = [e for e in self._buffer if e["id"] > since_id]
+        if limit is not None and len(items) > limit:
+            items = items[-limit:]
+        return items
+
+    def latest_id(self) -> int:
+        with self._lock:
+            return self._counter
+
+
+log_buffer_handler = RingBufferLogHandler(_LOG_BUFFER_MAXLEN)
+log_buffer_handler.setFormatter(_LOG_FORMATTER)
+root_logger.addHandler(log_buffer_handler)
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +217,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.5.0"
+APP_VERSION = "v0.5.1"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -316,6 +376,42 @@ session_plex_credentials = {
 
 # Event used to cancel an ongoing sync
 stop_event = Event()
+
+# --------------------------------------------------------------------------- #
+# LIVE SYNC STATUS (shared with the web UI)
+# --------------------------------------------------------------------------- #
+# Snapshot of the most recent / current sync run, surfaced on the Sync page so
+# the user can see when a run started, when it finished and what triggered it.
+_sync_state_lock = Lock()
+SYNC_STATE = {
+    "running": False,
+    "trigger": None,     # "scheduled" | "once" | "live"
+    "mode": None,        # "full" | "watchlist"
+    "started_at": None,  # ISO-8601 UTC
+    "finished_at": None, # ISO-8601 UTC
+    "result": None,      # "success" | "error" | "stopped"
+}
+
+
+def _mark_sync_start(trigger: str, mode: str = "full") -> None:
+    """Record that a sync run has just begun."""
+    with _sync_state_lock:
+        SYNC_STATE["running"] = True
+        SYNC_STATE["trigger"] = trigger
+        SYNC_STATE["mode"] = mode
+        SYNC_STATE["started_at"] = datetime.now(timezone.utc).isoformat()
+        SYNC_STATE["finished_at"] = None
+        SYNC_STATE["result"] = None
+    logger.info("Sync run started (trigger=%s, mode=%s)", trigger, mode)
+
+
+def _mark_sync_finish(result: str) -> None:
+    """Record that the current sync run has finished."""
+    with _sync_state_lock:
+        SYNC_STATE["running"] = False
+        SYNC_STATE["finished_at"] = datetime.now(timezone.utc).isoformat()
+        SYNC_STATE["result"] = result
+    logger.info("Sync run finished (result=%s)", result)
 
 
 def ensure_directory(path: str) -> None:
@@ -1487,22 +1583,50 @@ def _sync_dual():
     logger.info("Dual-provider sync finished.")
 
 
-def sync():
+def sync(trigger: str = "scheduled"):
     """Run the main synchronization logic with selected user."""
     if not _sync_lock.acquire(blocking=False):
         logger.warning("Sync already in progress, skipping this run")
         return
+    _mark_sync_start(trigger, mode="full")
+    result = "success"
     try:
         if SYNC_PROVIDER == "both":
             _sync_dual()
         else:
             _sync_inner()
     except Exception as exc:
+        result = "error"
         import traceback
         logger.error("Sync crashed with unhandled exception: %s", exc)
         logger.error("Traceback: %s", traceback.format_exc())
     finally:
+        if stop_event.is_set():
+            result = "stopped"
+        _mark_sync_finish(result)
         _sync_lock.release()
+
+
+def sync_watchlists_job(trigger: str = "scheduled"):
+    """Entry point for watchlist-only syncs, with shared status tracking.
+
+    Wraps :func:`sync_watchlists_only` so scheduled runs, one-off runs and
+    webhook-driven runs all report their start/finish state to the UI. The inner
+    function is left untouched because it is also reused inside the full sync.
+    """
+    _mark_sync_start(trigger, mode="watchlist")
+    result = "success"
+    try:
+        sync_watchlists_only()
+    except Exception as exc:  # noqa: BLE001
+        result = "error"
+        import traceback
+        logger.error("Watchlist sync crashed: %s", exc)
+        logger.error("Traceback: %s", traceback.format_exc())
+    finally:
+        if stop_event.is_set():
+            result = "stopped"
+        _mark_sync_finish(result)
 
 
 def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
@@ -2806,9 +2930,9 @@ def sync_once():
         [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
     )
     if only_watchlist:
-        Thread(target=sync_watchlists_only).start()
+        Thread(target=sync_watchlists_job, kwargs={"trigger": "once"}).start()
     else:
-        Thread(target=sync).start()
+        Thread(target=sync, kwargs={"trigger": "once"}).start()
 
     return redirect(
         url_for(
@@ -2999,6 +3123,64 @@ def stop():
         url_for("index", message="Sync stopped successfully!", mtype="stopped")
     )
 
+
+@app.route("/api/sync_status")
+@login_required
+def api_sync_status():
+    """Report the scheduled job and the state of the most recent sync run."""
+    job = scheduler.get_job("sync_job")
+    next_run = None
+    interval_minutes = None
+    if job is not None:
+        if job.next_run_time is not None:
+            next_run = job.next_run_time.isoformat()
+        interval = getattr(getattr(job, "trigger", None), "interval", None)
+        if interval is not None:
+            interval_minutes = int(interval.total_seconds() // 60)
+
+    with _sync_state_lock:
+        state = dict(SYNC_STATE)
+
+    return jsonify(
+        {
+            "scheduled": job is not None,
+            "interval_minutes": interval_minutes
+            if interval_minutes is not None
+            else SYNC_INTERVAL_MINUTES,
+            "next_run": next_run,
+            "running": state["running"],
+            "trigger": state["trigger"],
+            "mode": state["mode"],
+            "started_at": state["started_at"],
+            "finished_at": state["finished_at"],
+            "result": state["result"],
+            "server_time": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+
+@app.route("/logs")
+@login_required
+def logs_page():
+    """Render the live logs viewer."""
+    return render_template("logs.html")
+
+
+@app.route("/api/logs")
+@login_required
+def api_logs():
+    """Return buffered log entries newer than the ``since`` id (long-poll friendly)."""
+    try:
+        since = int(request.args.get("since", "0"))
+    except (TypeError, ValueError):
+        since = 0
+    entries = log_buffer_handler.get_since(since, limit=1000)
+    return jsonify(
+        {
+            "entries": entries,
+            "last_id": log_buffer_handler.latest_id(),
+        }
+    )
 
 
 @app.route("/backup")
@@ -3200,8 +3382,10 @@ def plex_webhook():
         only_watchlist = SYNC_WATCHLISTS and not any(
             [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
         )
-        job_func = sync_watchlists_only if only_watchlist else sync
-        scheduler.add_job(job_func, "date", run_date=datetime.now())
+        job_func = sync_watchlists_job if only_watchlist else sync
+        scheduler.add_job(
+            job_func, "date", run_date=datetime.now(), kwargs={"trigger": "live"}
+        )
     return "", 204
 
 
@@ -3797,13 +3981,14 @@ def start_scheduler():
     only_watchlist = SYNC_WATCHLISTS and not any(
         [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
     )
-    job_func = sync_watchlists_only if only_watchlist else sync
+    job_func = sync_watchlists_job if only_watchlist else sync
     scheduler.add_job(
         job_func,
         "interval",
         minutes=SYNC_INTERVAL_MINUTES,
         id="sync_job",
         replace_existing=True,
+        kwargs={"trigger": "scheduled"},
     )
     logger.info(
         "%s job scheduled with interval %d minutes",
