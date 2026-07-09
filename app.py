@@ -100,6 +100,8 @@ from trakt_utils import (
     sync_personal_lists_to_plex,
     sync_playback_plex_to_trakt,
     sync_playback_trakt_to_plex,
+    sync_trakt_recommendations_to_plex,
+    sync_trakt_discovery_to_plex,
 )
 from simkl_utils import (
     simkl_request,
@@ -115,6 +117,7 @@ from simkl_utils import (
     sync_plex_playback_to_simkl,
     sync_playback_simkl_to_plex,
     sync_watchlist_plex_simkl,
+    sync_simkl_trending_to_plex,
 )
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +235,7 @@ SYNC_WATCHED = True  # ahora sí se respeta este flag
 SYNC_LIKED_LISTS = False
 SYNC_WATCHLISTS = False
 SYNC_PLAYBACK = False  # mirror in-progress resume points ("continue watching")
+SYNC_RECOMMENDATIONS = False  # materialize recommendations/trending as Plex collections
 LIVE_SYNC = False
 SYNC_PROVIDER = "none"  # trakt | simkl | both | none
 
@@ -565,7 +569,7 @@ def save_provider(provider: str) -> None:
 def load_settings() -> None:
     """Load sync settings from :data:`SETTINGS_FILE` if present."""
     global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED
-    global SYNC_LIKED_LISTS, SYNC_WATCHLISTS, SYNC_PLAYBACK, LIVE_SYNC
+    global SYNC_LIKED_LISTS, SYNC_WATCHLISTS, SYNC_PLAYBACK, SYNC_RECOMMENDATIONS, LIVE_SYNC
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION
     global WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
     global WATCHLIST_CONFLICT_RESOLUTION, WATCHLIST_REMOVAL_ENABLED
@@ -581,6 +585,7 @@ def load_settings() -> None:
             SYNC_LIKED_LISTS = data.get("liked_lists", SYNC_LIKED_LISTS)
             SYNC_WATCHLISTS = data.get("watchlists", SYNC_WATCHLISTS)
             SYNC_PLAYBACK = data.get("playback", SYNC_PLAYBACK)
+            SYNC_RECOMMENDATIONS = data.get("recommendations", SYNC_RECOMMENDATIONS)
             LIVE_SYNC = data.get("live_sync", LIVE_SYNC)
             HISTORY_SYNC_DIRECTION = data.get("history_direction", HISTORY_SYNC_DIRECTION)
             LISTS_SYNC_DIRECTION = data.get("lists_direction", LISTS_SYNC_DIRECTION)
@@ -615,6 +620,7 @@ def save_settings() -> None:
         "liked_lists": SYNC_LIKED_LISTS,
         "watchlists": SYNC_WATCHLISTS,
         "playback": SYNC_PLAYBACK,
+        "recommendations": SYNC_RECOMMENDATIONS,
         "live_sync": LIVE_SYNC,
         "history_direction": HISTORY_SYNC_DIRECTION,
         "lists_direction": LISTS_SYNC_DIRECTION,
@@ -2015,6 +2021,23 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
         except Exception as exc:  # noqa: BLE001
             logger.error("Playback sync failed: %s", exc)
 
+    # Discovery collections: recommendations + trending/popular/anticipated
+    # materialized as dynamic Plex collections. Owner-only (server-level
+    # collections) and fully isolated so a failure never aborts the sync.
+    if SYNC_RECOMMENDATIONS and selected_user.get("is_owner", False):
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
+        try:
+            if active_provider == "trakt":
+                sync_trakt_recommendations_to_plex(sync_plex, headers)
+                for list_type in ("trending", "popular", "anticipated"):
+                    sync_trakt_discovery_to_plex(sync_plex, headers, list_type)
+            elif active_provider == "simkl":
+                sync_simkl_trending_to_plex(sync_plex)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Discovery collections sync failed: %s", exc)
+
     if SYNC_WATCHED and not defer_save:
         save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
 
@@ -2511,7 +2534,7 @@ def save_redirect_uris_api():
 @app.route("/", methods=["GET", "POST"])
 @login_required
 def index():
-    global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, SYNC_PLAYBACK, LIVE_SYNC
+    global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, SYNC_PLAYBACK, SYNC_RECOMMENDATIONS, LIVE_SYNC
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
 
     load_trakt_tokens()
@@ -2529,6 +2552,7 @@ def index():
         SYNC_LIKED_LISTS = request.form.get("liked_lists") is not None
         SYNC_WATCHLISTS = request.form.get("watchlists") is not None
         SYNC_PLAYBACK = request.form.get("playback") is not None
+        SYNC_RECOMMENDATIONS = request.form.get("recommendations") is not None
         LIVE_SYNC = request.form.get("live_sync") is not None
 
         HISTORY_SYNC_DIRECTION = request.form.get("history_direction", DIRECTION_BOTH)
@@ -2594,6 +2618,7 @@ def index():
     display_liked_lists = SYNC_LIKED_LISTS
     display_watchlists = SYNC_WATCHLISTS
     display_playback = SYNC_PLAYBACK
+    display_recommendations = SYNC_RECOMMENDATIONS
     display_live_sync = LIVE_SYNC
 
     if SYNC_PROVIDER == "simkl":
@@ -2617,6 +2642,7 @@ def index():
         liked_lists=display_liked_lists,
         watchlists=display_watchlists,
         playback=display_playback,
+        recommendations=display_recommendations,
         live_sync=display_live_sync,
         history_direction=HISTORY_SYNC_DIRECTION,
         lists_direction=LISTS_SYNC_DIRECTION,
@@ -2633,7 +2659,7 @@ def index():
 @app.route("/sync_once", methods=["POST"])
 @login_required
 def sync_once():
-    global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, SYNC_PLAYBACK, LIVE_SYNC
+    global SYNC_INTERVAL_MINUTES, SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS, SYNC_WATCHLISTS, SYNC_PLAYBACK, SYNC_RECOMMENDATIONS, LIVE_SYNC
     global HISTORY_SYNC_DIRECTION, LISTS_SYNC_DIRECTION, WATCHLISTS_SYNC_DIRECTION, RATINGS_SYNC_DIRECTION, COLLECTION_SYNC_DIRECTION
 
     load_trakt_tokens()
@@ -2649,6 +2675,7 @@ def sync_once():
     SYNC_LIKED_LISTS = request.form.get("liked_lists") is not None
     SYNC_WATCHLISTS = request.form.get("watchlists") is not None
     SYNC_PLAYBACK = request.form.get("playback") is not None
+    SYNC_RECOMMENDATIONS = request.form.get("recommendations") is not None
     LIVE_SYNC = request.form.get("live_sync") is not None
 
     HISTORY_SYNC_DIRECTION = request.form.get("history_direction", DIRECTION_BOTH)

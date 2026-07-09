@@ -15,6 +15,9 @@ from utils import (
     find_item_by_guid,
     best_guid,
     safe_timestamp_compare,
+    ids_to_guid,
+    match_guids_to_plex,
+    sync_items_to_collection,
 )
 
 logger = logging.getLogger(__name__)
@@ -696,6 +699,63 @@ def resolve_anime_ids(headers: dict, ids: dict, *, is_movie: bool = False) -> di
     except Exception as exc:  # noqa: BLE001
         logger.warning("Anime id resolution failed: %s", exc)
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Discovery: trending -> Plex collection (public Simkl CDN)
+# ---------------------------------------------------------------------------
+
+# Simkl serves "most watched" surfaces as public, CDN-cached JSON (no user
+# token needed). Simkl has no personalized-recommendations API, so only
+# trending is materialized on the Plex side.
+SIMKL_DISCOVER_BASE = "https://data.simkl.in/discover"
+
+
+def get_simkl_trending(period: str = "today", count: int = 100) -> dict:
+    """Return Simkl's public trending data (``{tv:[...], anime:[...], ...}``).
+
+    ``period`` is ``today``/``week``/``month``. Returns ``{}`` on failure.
+    """
+    url = f"{SIMKL_DISCOVER_BASE}/trending/{period}_{count}.json"
+    params = {"app-name": APP_NAME, "app-version": APP_VERSION}
+    client_id = os.environ.get("SIMKL_CLIENT_ID")
+    if client_id:
+        params["client_id"] = client_id
+    try:
+        resp = requests.get(
+            url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Simkl trending: %s", exc)
+        return {}
+
+
+def _simkl_trending_guids(data: dict) -> list:
+    """Extract library-matchable guids from a Simkl trending payload."""
+    guids = []
+    for key in ("movies", "tv", "shows", "anime"):
+        for item in (data or {}).get(key, []) or []:
+            if not isinstance(item, dict):
+                continue
+            guid = ids_to_guid(item.get("ids", {}) or {})
+            if guid:
+                guids.append(guid)
+    return guids
+
+
+def sync_simkl_trending_to_plex(
+    plex, collection_name: str = "Trending on Simkl", *, period: str = "today"
+) -> int:
+    """Materialize Simkl trending as a dynamic Plex collection (library items only)."""
+    data = get_simkl_trending(period=period)
+    plex_items = match_guids_to_plex(plex, _simkl_trending_guids(data))
+    total = sync_items_to_collection(plex, plex_items, collection_name, reconcile=True)
+    if total:
+        logger.info("Simkl trending -> Plex collection '%s': %d item(s)", collection_name, total)
+    return total
 
 
 # ---------------------------------------------------------------------------

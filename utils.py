@@ -268,6 +268,103 @@ def ensure_collection(plex, section, name, first_item=None):
         return plex.createCollection(name, section, items=[first_item])
 
 
+def ids_to_guid(ids) -> Optional[str]:
+    """Return a Plex-style ``prefix://id`` guid from an ids dict.
+
+    Prefers imdb -> tmdb -> tvdb -> anidb (the ids Plex/Trakt/Simkl share).
+    """
+    if not isinstance(ids, dict):
+        return None
+    for key in ("imdb", "tmdb", "tvdb", "anidb"):
+        if ids.get(key):
+            return f"{key}://{ids[key]}"
+    return None
+
+
+def match_guids_to_plex(plex, guids) -> list:
+    """Return the Plex library items matching an iterable of guids (deduped)."""
+    seen = set()
+    items = []
+    for guid in guids:
+        if not guid or guid in seen:
+            continue
+        seen.add(guid)
+        item = find_item_by_guid(plex, guid)
+        if item is not None:
+            items.append(item)
+    return items
+
+
+def sync_items_to_collection(plex, plex_items, collection_name, *, reconcile=False) -> int:
+    """Add matched Plex items to a named collection, per library section.
+
+    When ``reconcile`` is True the collection is kept in sync with
+    ``plex_items`` (items no longer present are removed from the collection).
+    Removal only affects collection membership – never the media itself – and is
+    skipped when the target set is empty, so a failed/empty fetch never wipes a
+    collection. Returns the number of items targeted.
+    """
+    if not plex_items:
+        return 0
+
+    by_section: Dict[object, list] = {}
+    for it in plex_items:
+        sid = getattr(it, "librarySectionID", None)
+        by_section.setdefault(sid, []).append(it)
+
+    total = 0
+    for sid, items in by_section.items():
+        section = None
+        try:
+            if sid is not None:
+                section = plex.library.sectionByID(sid)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to resolve section %s: %s", sid, exc)
+        if section is None:
+            try:
+                section = items[0].section()
+            except Exception:  # noqa: BLE001
+                continue
+        try:
+            coll = ensure_collection(plex, section, collection_name, first_item=items[0])
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to ensure collection '%s': %s", collection_name, exc)
+            continue
+
+        try:
+            current = list(coll.items())
+        except Exception:  # noqa: BLE001
+            current = []
+        current_by_guid = {}
+        for c in current:
+            g = best_guid(c)
+            if g:
+                current_by_guid[g] = c
+        target_by_guid = {}
+        for pi in items:
+            g = best_guid(pi)
+            if g:
+                target_by_guid[g] = pi
+
+        to_add = [pi for g, pi in target_by_guid.items() if g not in current_by_guid]
+        if to_add:
+            try:
+                coll.addItems(to_add)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed adding to collection '%s': %s", collection_name, exc)
+
+        if reconcile and target_by_guid:
+            to_remove = [c for g, c in current_by_guid.items() if g not in target_by_guid]
+            if to_remove:
+                try:
+                    coll.removeItems(to_remove)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Failed removing from collection '%s': %s", collection_name, exc)
+
+        total += len(target_by_guid)
+    return total
+
+
 def movie_key(title: str, year: Optional[int], guid: Optional[str]) -> Union[str, Tuple[str, Optional[int]]]:
     """Return a unique key for comparing movies."""
     if guid:

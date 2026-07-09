@@ -25,6 +25,9 @@ from utils import (
     ensure_collection,
     find_item_by_guid,
     safe_timestamp_compare,
+    ids_to_guid,
+    match_guids_to_plex,
+    sync_items_to_collection,
 )
 
 logger = logging.getLogger(__name__)
@@ -1041,6 +1044,91 @@ def sync_playback_trakt_to_plex(plex, headers) -> int:
     if count:
         logger.info("Applied %d resume point(s) from Trakt to Plex", count)
     return count
+
+
+# ---------------------------------------------------------------------------
+# Discovery: recommendations + trending/popular/anticipated -> Plex collections
+# ---------------------------------------------------------------------------
+
+TRAKT_DISCOVERY_TYPES = ("trending", "popular", "anticipated", "boxoffice")
+
+
+def get_trakt_recommendations(headers: dict, media_type: str = "movies", *, limit: int = 50) -> list:
+    """Return personalized Trakt recommendations (``GET /recommendations/{type}``)."""
+    endpoint = f"/recommendations/{media_type}"
+    params = {"limit": limit} if limit else {}
+    try:
+        data = trakt_request("GET", endpoint, headers, params=params).json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Trakt recommendations (%s): %s", media_type, exc)
+        return []
+
+
+def get_trakt_discovery(
+    headers: dict, media_type: str = "movies", list_type: str = "trending", *, limit: int = 50
+) -> list:
+    """Return a Trakt discovery list (``GET /{type}/{trending|popular|anticipated}``)."""
+    endpoint = f"/{media_type}/{list_type}"
+    params = {"limit": limit} if limit else {}
+    try:
+        data = trakt_request("GET", endpoint, headers, params=params).json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Trakt %s (%s): %s", list_type, media_type, exc)
+        return []
+
+
+def _trakt_items_to_guids(items, media_type: str) -> list:
+    """Extract guids from a discovery/recommendation list.
+
+    Handles both wrapped items (``{"watchers": .., "movie": {...}}`` for
+    trending/anticipated) and flat media objects (popular/recommendations).
+    """
+    singular = "movie" if media_type == "movies" else "show"
+    guids = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        media = it.get(singular, it)
+        guid = ids_to_guid(media.get("ids", {}) if isinstance(media, dict) else {})
+        if guid:
+            guids.append(guid)
+    return guids
+
+
+def sync_trakt_recommendations_to_plex(
+    plex, headers, collection_name: str = "Recommended by Trakt"
+) -> int:
+    """Materialize Trakt recommendations as a dynamic Plex collection.
+
+    Only items present in the Plex library are added. The collection is
+    reconciled each run so it reflects the current recommendations.
+    """
+    total = 0
+    for media_type in ("movies", "shows"):
+        items = get_trakt_recommendations(headers, media_type)
+        plex_items = match_guids_to_plex(plex, _trakt_items_to_guids(items, media_type))
+        total += sync_items_to_collection(plex, plex_items, collection_name, reconcile=True)
+    if total:
+        logger.info("Trakt recommendations -> Plex collection '%s': %d item(s)", collection_name, total)
+    return total
+
+
+def sync_trakt_discovery_to_plex(
+    plex, headers, list_type: str = "trending", collection_name: Optional[str] = None
+) -> int:
+    """Materialize a Trakt discovery list (trending/popular/anticipated) as a
+    dynamic Plex collection."""
+    name = collection_name or f"{list_type.capitalize()} on Trakt"
+    total = 0
+    for media_type in ("movies", "shows"):
+        items = get_trakt_discovery(headers, media_type, list_type)
+        plex_items = match_guids_to_plex(plex, _trakt_items_to_guids(items, media_type))
+        total += sync_items_to_collection(plex, plex_items, name, reconcile=True)
+    if total:
+        logger.info("Trakt %s -> Plex collection '%s': %d item(s)", list_type, name, total)
+    return total
 
 
 def sync_liked_lists(plex, headers):
