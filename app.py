@@ -129,22 +129,80 @@ werkzeug_logger.setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.11"
+APP_VERSION = "v0.4.12"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
 # FLASK + APSCHEDULER
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Parse a boolean-ish environment variable."""
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an integer environment variable, falling back on bad input."""
+    try:
+        raw = os.environ.get(name)
+        if raw is None or raw.strip() == "":
+            return default
+        return int(raw.strip())
+    except (TypeError, ValueError):
+        return default
+
+
+# --------------------------------------------------------------------------- #
+# SECURITY / HARDENING CONFIGURATION (env-tunable)
+# --------------------------------------------------------------------------- #
+# Number of trusted reverse proxies in front of the app. When >0 the real
+# client IP is read from X-Forwarded-For (required for correct per-client login
+# rate limiting behind Nginx/Traefik/Caddy/etc.). Default 0 means the header is
+# NOT trusted, so a directly-exposed instance cannot be tricked into accepting a
+# spoofed X-Forwarded-For value. Set to the exact number of proxies you run.
+TRUSTED_PROXY_COUNT = _env_int("PLEXYTRACK_TRUSTED_PROXY_COUNT", 0)
+
+# Mark session/CSRF cookies as Secure (HTTPS-only). Enable when the app is
+# served over HTTPS (strongly recommended for internet-exposed deployments).
+# Left off by default so plain-HTTP LAN access keeps working out of the box.
+SECURE_COOKIES = _env_flag("PLEXYTRACK_SECURE_COOKIES", False)
+
+# Optional shared secret required by the Plex webhook endpoint. When set,
+# incoming webhook requests must present ?token=<secret> (or an
+# X-Webhook-Token header). Unset keeps the endpoint open (backward compatible).
+WEBHOOK_TOKEN = os.environ.get("PLEXYTRACK_WEBHOOK_TOKEN", "").strip()
+
+# Password policy. Minimum length is enforced on every new/changed password.
+# MAX guards the hashing routine against denial-of-service via huge inputs.
+MIN_PASSWORD_LENGTH = _env_int("PLEXYTRACK_MIN_PASSWORD_LENGTH", 8)
+MAX_PASSWORD_LENGTH = 1024
+
+# CSRF protection settings
+CSRF_COOKIE_NAME = "plexytrack_csrf"
+CSRF_HEADER_NAMES = ("X-CSRFToken", "X-CSRF-Token")
+CSRF_FORM_FIELD = "_csrf_token"
+# Endpoints that must accept unauthenticated / cross-context POSTs.
+CSRF_EXEMPT_ENDPOINTS = {"login_page", "plex_webhook", "static"}
+
 # Honor X-Forwarded headers when running behind a reverse proxy so that
-# request.url_root uses the external address and scheme.
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+# request.url_root uses the external address and scheme. ``x_for`` is set from
+# the trusted-proxy count above so client IPs used for rate limiting are only
+# taken from X-Forwarded-For when a proxy is actually declared.
+app.wsgi_app = ProxyFix(
+    app.wsgi_app, x_for=TRUSTED_PROXY_COUNT, x_proto=1, x_host=1
+)
 # Generate a strong random secret key if not provided via env
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 # Secure session cookie settings for internet-exposed deployment
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=SECURE_COOKIES,
     PERMANENT_SESSION_LIFETIME=86400,  # 24 hours
 )
 
@@ -258,6 +316,26 @@ def _record_login_attempt(ip: str) -> None:
     _login_attempts[ip].append(time.time())
 
 
+def _reset_login_attempts(ip: str) -> None:
+    """Clear recorded attempts for an IP (e.g. after a successful login)."""
+    _login_attempts.pop(ip, None)
+
+
+def _client_ip() -> str:
+    """Best-effort client IP.
+
+    ``request.remote_addr`` already reflects X-Forwarded-For when
+    ``TRUSTED_PROXY_COUNT`` > 0 (see ProxyFix setup); otherwise it is the
+    direct peer address, which cannot be spoofed by the client.
+    """
+    return (request.remote_addr if has_request_context() else None) or "unknown"
+
+
+def _password_meets_policy(password: str) -> bool:
+    """Return True when a password satisfies the current length policy."""
+    return MIN_PASSWORD_LENGTH <= len(password) <= MAX_PASSWORD_LENGTH
+
+
 def load_credentials() -> dict:
     """Load user credentials from CREDENTIALS_FILE."""
     if os.path.exists(CREDENTIALS_FILE):
@@ -290,6 +368,9 @@ def ensure_default_credentials() -> None:
             "password_hash": generate_password_hash(
                 "admin", method="pbkdf2:sha256", salt_length=16
             ),
+            # Flags the still-default admin/admin login so the app can force a
+            # password change on first sign-in (see login_page).
+            "is_default": True,
         }
         save_credentials(creds)
         logger.info("Default credentials created (admin/admin). Change the password!")
@@ -318,6 +399,123 @@ def login_required(f):
             return redirect(url_for("login_page"))
         return f(*args, **kwargs)
     return decorated_function
+
+
+# --------------------------------------------------------------------------- #
+# CSRF PROTECTION (synchronizer token, cookie-distributed)
+# --------------------------------------------------------------------------- #
+def get_csrf_token() -> str:
+    """Return the session CSRF token, creating one if needed."""
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _extract_request_csrf() -> str:
+    """Pull the CSRF token from headers, form data or a JSON body."""
+    for header in CSRF_HEADER_NAMES:
+        val = request.headers.get(header)
+        if val:
+            return val
+    val = request.form.get(CSRF_FORM_FIELD)
+    if val:
+        return val
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        if isinstance(data, dict) and data.get(CSRF_FORM_FIELD):
+            return str(data.get(CSRF_FORM_FIELD))
+    return ""
+
+
+def _wants_json_response() -> bool:
+    return bool(
+        request.is_json
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or "application/json" in request.headers.get("Accept", "")
+    )
+
+
+# Endpoints reachable while a forced password change is pending.
+_PW_CHANGE_ALLOWED_ENDPOINTS = {
+    "account_password_page",
+    "change_password",
+    "logout",
+    "security_status",
+    "static",
+}
+
+
+@app.before_request
+def _security_before_request():
+    """Enforce CSRF on mutating requests and forced password changes."""
+    endpoint = request.endpoint or ""
+    authenticated = bool(session.get("authenticated"))
+
+    # Make sure an authenticated session always carries a CSRF token so the
+    # cookie can be published (see _publish_csrf_cookie).
+    if authenticated:
+        get_csrf_token()
+
+    # ---- CSRF validation (only for state-changing, authenticated requests) --
+    if request.method not in ("GET", "HEAD", "OPTIONS", "TRACE"):
+        if authenticated and endpoint not in CSRF_EXEMPT_ENDPOINTS:
+            expected = session.get("_csrf_token", "")
+            provided = _extract_request_csrf()
+            if not expected or not provided or not hmac.compare_digest(
+                str(provided), str(expected)
+            ):
+                logger.warning(
+                    "CSRF validation failed for %s %s from %s",
+                    request.method, request.path, _client_ip(),
+                )
+                if _wants_json_response():
+                    return jsonify(
+                        {"success": False, "error": "CSRF validation failed"}
+                    ), 400
+                return ("CSRF validation failed", 400)
+
+    # ---- Forced password change (default admin/admin credentials) -----------
+    if (
+        authenticated
+        and session.get("must_change_password")
+        and endpoint not in _PW_CHANGE_ALLOWED_ENDPOINTS
+    ):
+        if _wants_json_response():
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Password change required",
+                    "redirect": url_for("account_password_page"),
+                }
+            ), 403
+        return redirect(url_for("account_password_page"))
+
+    return None
+
+
+@app.after_request
+def _publish_csrf_cookie(response):
+    """Expose the CSRF token to JS via a readable, same-site cookie."""
+    if session.get("authenticated"):
+        token = session.get("_csrf_token")
+        if token:
+            response.set_cookie(
+                CSRF_COOKIE_NAME,
+                token,
+                max_age=86400,
+                samesite="Lax",
+                secure=SECURE_COOKIES,
+                httponly=False,
+            )
+    return response
+
+
+@app.context_processor
+def inject_csrf_token():
+    """Make ``csrf_token()`` available inside templates."""
+    return {"csrf_token": get_csrf_token}
 
 
 # --------------------------------------------------------------------------- #
@@ -1744,16 +1942,45 @@ def login_page():
 
     error = None
     if request.method == "POST":
-        ip = request.remote_addr or "unknown"
+        ip = _client_ip()
         if _is_rate_limited(ip):
             error = "Too many failed attempts. Please wait 5 minutes."
         else:
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
-            if verify_credentials(username, password):
+            # Reject over-long passwords before hashing to avoid a CPU DoS.
+            too_long = len(password) > MAX_PASSWORD_LENGTH
+            if not too_long and verify_credentials(username, password):
+                _reset_login_attempts(ip)
                 session.permanent = True
                 session["authenticated"] = True
                 session["auth_user"] = username
+                session["_csrf_token"] = secrets.token_urlsafe(32)
+                session.pop("must_change_password", None)
+                session.pop("password_upgrade_notice", None)
+
+                creds = load_credentials()
+                is_default = creds.get("is_default")
+                if is_default is None:
+                    # Legacy credentials without the flag: only treat as default
+                    # if they are literally the shipped admin/admin pair.
+                    is_default = (
+                        username.lower() == "admin" and password == "admin"
+                    )
+                if is_default:
+                    # Still on shipped defaults: force a password change.
+                    session["must_change_password"] = True
+                    logger.info(
+                        "Login with default credentials from %s; forcing "
+                        "password change", ip,
+                    )
+                elif not creds.get("pw_ack") and not _password_meets_policy(
+                    password
+                ):
+                    # Existing custom password that predates the reinforced
+                    # policy: show a dismissible upgrade notice (change or ignore).
+                    session["password_upgrade_notice"] = True
+
                 logger.info("Successful login from %s", ip)
                 return redirect(url_for("index"))
             else:
@@ -1779,8 +2006,17 @@ def change_password():
     if new_password != confirm_password:
         return jsonify({"success": False, "error": "Passwords do not match."}), 400
 
-    if len(new_password) < 4:
-        return jsonify({"success": False, "error": "Password must be at least 4 characters."}), 400
+    if len(new_password) > MAX_PASSWORD_LENGTH:
+        return jsonify({
+            "success": False,
+            "error": f"Password must be at most {MAX_PASSWORD_LENGTH} characters.",
+        }), 400
+
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        return jsonify({
+            "success": False,
+            "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
+        }), 400
 
     creds = load_credentials()
     stored_user = creds.get("username", "")
@@ -1790,9 +2026,50 @@ def change_password():
     creds["password_hash"] = generate_password_hash(
         new_password, method="pbkdf2:sha256", salt_length=16
     )
+    # A freshly chosen, policy-compliant password clears the default flag and
+    # acknowledges the reinforced policy so notices stop appearing.
+    creds["is_default"] = False
+    creds["pw_ack"] = True
     save_credentials(creds)
+    session.pop("must_change_password", None)
+    session.pop("password_upgrade_notice", None)
     logger.info("Password changed successfully for user '%s'", username)
     return jsonify({"success": True, "message": "Password changed successfully."})
+
+
+@app.route("/account/password", methods=["GET"])
+@login_required
+def account_password_page():
+    """Dedicated change-password page (also used for the forced change flow)."""
+    forced = bool(session.get("must_change_password"))
+    return render_template(
+        "account_password.html",
+        forced=forced,
+        min_password_length=MIN_PASSWORD_LENGTH,
+        username=session.get("auth_user", ""),
+    )
+
+
+@app.route("/api/security/status", methods=["GET"])
+@login_required
+def security_status():
+    """Report the current account security posture to the frontend."""
+    return jsonify({
+        "must_change_password": bool(session.get("must_change_password")),
+        "password_upgrade_notice": bool(session.get("password_upgrade_notice")),
+        "min_password_length": MIN_PASSWORD_LENGTH,
+    })
+
+
+@app.route("/api/security/ack_password", methods=["POST"])
+@login_required
+def ack_password_notice():
+    """Dismiss the reinforced-password notice ('ignore' choice)."""
+    creds = load_credentials()
+    creds["pw_ack"] = True
+    save_credentials(creds)
+    session.pop("password_upgrade_notice", None)
+    return jsonify({"success": True})
 
 
 @app.route("/api/disconnect_service", methods=["POST"])
@@ -2270,6 +2547,7 @@ def settings_page():
         "settings.html",
         trakt_redirect_uri=get_trakt_redirect_uri(),
         simkl_redirect_uri=get_simkl_redirect_uri(),
+        min_password_length=MIN_PASSWORD_LENGTH,
     )
 
 
@@ -2511,6 +2789,15 @@ def migration_page():
 @app.route("/webhook", methods=["POST"])
 def plex_webhook():
     """Handle Plex webhook events for live synchronization."""
+    # Optional shared-secret gate. Only enforced when PLEXYTRACK_WEBHOOK_TOKEN
+    # is configured, so existing setups keep working unchanged.
+    if WEBHOOK_TOKEN:
+        provided = request.args.get("token") or request.headers.get(
+            "X-Webhook-Token", ""
+        )
+        if not hmac.compare_digest(provided, WEBHOOK_TOKEN):
+            logger.warning("Rejected webhook with invalid token from %s", _client_ip())
+            return ("", 403)
     if LIVE_SYNC:
         # Trigger a one-off sync immediately
         stop_event.clear()

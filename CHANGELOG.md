@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.12 (2026-07-09)
+
+### Security
+
+- **CSRF protection**: State-changing requests now require a per-session CSRF token (synchronizer token distributed via a readable cookie, attached automatically to fetch requests and form submissions). The `/login` and Plex `/webhook` endpoints are exempt.
+- **Proxy-aware login rate limiting**: `X-Forwarded-For` is only trusted when `PLEXYTRACK_TRUSTED_PROXY_COUNT` > 0, so a directly-exposed instance can no longer be tricked into accepting a spoofed client IP that bypasses the 5-attempts / 5-minutes brute-force limiter. A successful login now clears the counter.
+- **Secure cookies**: Session and CSRF cookies can be marked `Secure` via `PLEXYTRACK_SECURE_COOKIES=true` for HTTPS deployments.
+- **Reinforced password policy**: The minimum password length is now 8 (configurable via `PLEXYTRACK_MIN_PASSWORD_LENGTH`), with an upper bound to avoid hashing-based denial of service.
+- **Default-credential handling**: Signing in with the shipped `admin/admin` login now forces a password change before the app can be used. Existing custom passwords that fall short of the new policy show a dismissible notice offering to change or ignore.
+- **Optional webhook secret**: Setting `PLEXYTRACK_WEBHOOK_TOKEN` requires the `/webhook` endpoint to be called with a matching `?token=` (or `X-Webhook-Token` header).
+
+### Tests
+
+- **Added `tests/test_security.py`**: 21 tests covering rate limiting, CSRF enforcement, cookie flags, password policy, the forced/soft password-upgrade flows and the webhook token.
+
 ## v0.4.11 (2026-07-07)
 
 ### Bug Fixes

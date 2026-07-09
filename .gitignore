@@ -34,6 +34,7 @@ state/
 output.log
 auth.json
 state.json
+credentials.json
 trakt_tokens.json
 simkl_tokens.json
 provider.json
