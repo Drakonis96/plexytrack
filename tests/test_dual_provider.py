@@ -132,6 +132,69 @@ class TestSyncDispatch:
         assert called == ["single"]
 
 
+class TestCrossServiceBridgeWiring:
+    def test_provider_headers_trakt(self, monkeypatch):
+        monkeypatch.setenv("TRAKT_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("TRAKT_CLIENT_ID", "cid")
+        h = app._provider_headers("trakt")
+        assert h["Authorization"] == "Bearer tok"
+        assert h["trakt-api-key"] == "cid"
+        assert h["trakt-api-version"] == "2"
+
+    def test_provider_headers_none_without_token(self, monkeypatch):
+        monkeypatch.delenv("SIMKL_ACCESS_TOKEN", raising=False)
+        monkeypatch.setenv("SIMKL_CLIENT_ID", "cid")
+        assert app._provider_headers("simkl") is None
+
+    def test_bridge_runs_with_toggles(self, monkeypatch):
+        monkeypatch.setattr("app._provider_headers", lambda p: {"h": p})
+        monkeypatch.setattr("app.SYNC_RATINGS", True)
+        monkeypatch.setattr("app.SYNC_WATCHLISTS", False)
+        monkeypatch.setattr("app.SYNC_WATCHED", True)
+        captured = {}
+
+        def fake_bridge(th, sh, *, ratings, watchlist, history, **kw):
+            captured.update(ratings=ratings, watchlist=watchlist, history=history)
+            return {"ratings": 0}
+
+        import bridge_utils
+        monkeypatch.setattr(bridge_utils, "run_trakt_simkl_bridge", fake_bridge)
+        app._run_cross_service_bridge()
+        assert captured == {"ratings": True, "watchlist": False, "history": True}
+
+    def test_bridge_skipped_when_missing_headers(self, monkeypatch):
+        monkeypatch.setattr("app._provider_headers", lambda p: None if p == "simkl" else {"h": p})
+        ran = []
+        import bridge_utils
+        monkeypatch.setattr(bridge_utils, "run_trakt_simkl_bridge", lambda *a, **k: ran.append(1))
+        app._run_cross_service_bridge()
+        assert ran == []
+
+    def test_sync_dual_invokes_bridge_when_both(self, monkeypatch):
+        monkeypatch.setattr("app._resolve_dual_providers", lambda: ["trakt", "simkl"])
+        monkeypatch.setattr("app.load_last_plex_sync", lambda: None)
+        monkeypatch.setattr("app.save_last_plex_sync", lambda ts: None)
+        monkeypatch.setattr("app.SYNC_WATCHED", False)
+        monkeypatch.setattr("app._sync_inner", lambda **k: None)
+        called = []
+        monkeypatch.setattr("app._run_cross_service_bridge", lambda: called.append(1))
+        app.stop_event.clear()
+        app._sync_dual()
+        assert called == [1]
+
+    def test_sync_dual_skips_bridge_when_single(self, monkeypatch):
+        monkeypatch.setattr("app._resolve_dual_providers", lambda: ["trakt"])
+        monkeypatch.setattr("app.load_last_plex_sync", lambda: None)
+        monkeypatch.setattr("app.save_last_plex_sync", lambda ts: None)
+        monkeypatch.setattr("app.SYNC_WATCHED", False)
+        monkeypatch.setattr("app._sync_inner", lambda **k: None)
+        called = []
+        monkeypatch.setattr("app._run_cross_service_bridge", lambda: called.append(1))
+        app.stop_event.clear()
+        app._sync_dual()
+        assert called == []
+
+
 class TestSyncInnerProviderOverride:
     def test_active_provider_defaults_to_global(self, monkeypatch):
         """provider=None must fall back to the global SYNC_PROVIDER."""

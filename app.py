@@ -1292,6 +1292,59 @@ def _resolve_dual_providers():
     return providers
 
 
+def _provider_headers(provider):
+    """Return API headers for ``provider`` or ``None`` if it isn't configured."""
+    if provider == "trakt":
+        token = os.environ.get("TRAKT_ACCESS_TOKEN")
+        client = os.environ.get("TRAKT_CLIENT_ID")
+        if not (token and client):
+            return None
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "trakt-api-version": "2",
+            "trakt-api-key": client,
+        }
+    if provider == "simkl":
+        token = os.environ.get("SIMKL_ACCESS_TOKEN")
+        client = os.environ.get("SIMKL_CLIENT_ID")
+        if not (token and client):
+            return None
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "simkl-api-key": client,
+        }
+    return None
+
+
+def _run_cross_service_bridge():
+    """Reconcile Trakt <-> Simkl directly (connection #2).
+
+    Runs after both dual-mode provider passes so that data originating on one
+    service (rather than on Plex) also lands on the other. Gated by the same
+    per-type toggles used elsewhere and isolated so a failure never aborts sync.
+    """
+    trakt_headers = _provider_headers("trakt")
+    simkl_headers = _provider_headers("simkl")
+    if not (trakt_headers and simkl_headers):
+        return
+    try:
+        from bridge_utils import run_trakt_simkl_bridge
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not load cross-service bridge: %s", exc)
+        return
+    logger.info("Running direct Trakt<->Simkl bridge…")
+    result = run_trakt_simkl_bridge(
+        trakt_headers,
+        simkl_headers,
+        ratings=SYNC_RATINGS,
+        watchlist=SYNC_WATCHLISTS,
+        history=SYNC_WATCHED,
+    )
+    logger.info("Trakt<->Simkl bridge summary: %s", result or "nothing to do")
+
+
 def _sync_dual():
     """Run the full sync pipeline against Trakt and Simkl in a single pass.
 
@@ -1318,6 +1371,14 @@ def _sync_dual():
             import traceback
             logger.error("Dual sync pass for %s crashed: %s", prov, exc)
             logger.error("Traceback: %s", traceback.format_exc())
+
+    # Directly reconcile Trakt <-> Simkl for anything that originated on either
+    # service (not via Plex). Only meaningful when both are connected.
+    if not stop_event.is_set() and set(providers) == {"trakt", "simkl"}:
+        try:
+            _run_cross_service_bridge()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Cross-service bridge crashed: %s", exc)
 
     # Advance the shared Plex window only after both providers are done.
     if SYNC_WATCHED and not stop_event.is_set():
