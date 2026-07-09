@@ -174,6 +174,7 @@ class RingBufferLogHandler(logging.Handler):
         self._buffer = deque(maxlen=maxlen)
         self._lock = threading.Lock()
         self._counter = 0
+        self._error_count = 0
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -188,6 +189,8 @@ class RingBufferLogHandler(logging.Handler):
         }
         with self._lock:
             self._counter += 1
+            if record.levelno >= logging.ERROR:
+                self._error_count += 1
             entry["id"] = self._counter
             self._buffer.append(entry)
 
@@ -203,6 +206,11 @@ class RingBufferLogHandler(logging.Handler):
         with self._lock:
             return self._counter
 
+    def error_count(self) -> int:
+        """Total number of ERROR/CRITICAL records observed so far."""
+        with self._lock:
+            return self._error_count
+
 
 log_buffer_handler = RingBufferLogHandler(_LOG_BUFFER_MAXLEN)
 log_buffer_handler.setFormatter(_LOG_FORMATTER)
@@ -217,7 +225,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.5.1"
+APP_VERSION = "v0.5.2"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -1589,6 +1597,7 @@ def sync(trigger: str = "scheduled"):
         logger.warning("Sync already in progress, skipping this run")
         return
     _mark_sync_start(trigger, mode="full")
+    errors_before = log_buffer_handler.error_count()
     result = "success"
     try:
         if SYNC_PROVIDER == "both":
@@ -1603,6 +1612,10 @@ def sync(trigger: str = "scheduled"):
     finally:
         if stop_event.is_set():
             result = "stopped"
+        elif result == "success" and log_buffer_handler.error_count() > errors_before:
+            # The inner pipeline logs errors instead of raising (e.g. a failed
+            # Plex connection test), so a clean return isn't necessarily success.
+            result = "error"
         _mark_sync_finish(result)
         _sync_lock.release()
 
@@ -1615,6 +1628,7 @@ def sync_watchlists_job(trigger: str = "scheduled"):
     function is left untouched because it is also reused inside the full sync.
     """
     _mark_sync_start(trigger, mode="watchlist")
+    errors_before = log_buffer_handler.error_count()
     result = "success"
     try:
         sync_watchlists_only()
@@ -1626,6 +1640,8 @@ def sync_watchlists_job(trigger: str = "scheduled"):
     finally:
         if stop_event.is_set():
             result = "stopped"
+        elif result == "success" and log_buffer_handler.error_count() > errors_before:
+            result = "error"
         _mark_sync_finish(result)
 
 
@@ -3141,7 +3157,7 @@ def api_sync_status():
     with _sync_state_lock:
         state = dict(SYNC_STATE)
 
-    return jsonify(
+    resp = jsonify(
         {
             "scheduled": job is not None,
             "interval_minutes": interval_minutes
@@ -3157,6 +3173,9 @@ def api_sync_status():
             "server_time": datetime.now(timezone.utc).isoformat(),
         }
     )
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @app.route("/logs")
@@ -3175,12 +3194,17 @@ def api_logs():
     except (TypeError, ValueError):
         since = 0
     entries = log_buffer_handler.get_since(since, limit=1000)
-    return jsonify(
+    resp = jsonify(
         {
             "entries": entries,
             "last_id": log_buffer_handler.latest_id(),
         }
     )
+    # Defeat any browser/reverse-proxy caching so the live stream keeps flowing.
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 
 @app.route("/backup")

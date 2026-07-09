@@ -52,6 +52,7 @@
             <span class="log-status" id="logStatus">
               <span class="log-status-dot" id="logStatusDot"></span>
               <span id="logStatusText">Connecting…</span>
+              <span class="log-meta" id="logMeta"></span>
             </span>
             <div class="log-toolbar-controls">
               <label class="log-filter">
@@ -92,12 +93,13 @@
 
       const LEVEL_ORDER = { DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50 };
       const MAX_LINES = 2000;        // keep the DOM bounded
-      const POLL_INTERVAL = 1500;    // ms
+      const POLL_INTERVAL = 1000;    // ms
 
       const view = document.getElementById('logView');
       const emptyEl = document.getElementById('logEmpty');
       const statusDot = document.getElementById('logStatusDot');
       const statusText = document.getElementById('logStatusText');
+      const metaEl = document.getElementById('logMeta');
       const levelFilter = document.getElementById('logLevelFilter');
       const autoscroll = document.getElementById('logAutoscroll');
       const pauseBtn = document.getElementById('logPauseBtn');
@@ -107,10 +109,25 @@
       let paused = false;
       let inFlight = false;
       let timer = null;
+      let heartbeat = null;
+      let lastUpdate = 0;      // epoch ms of last successful poll
+      let lineCount = 0;
+      let connected = false;
 
       function setStatus(state, text) {
         statusDot.className = 'log-status-dot ' + state;
         statusText.textContent = text;
+      }
+
+      // A once-per-second heartbeat so the user can *see* the stream is alive
+      // even during quiet periods with no new log lines.
+      function renderMeta() {
+        let s = lineCount + (lineCount === 1 ? ' line' : ' lines');
+        if (connected && lastUpdate) {
+          const ago = Math.max(0, Math.round((Date.now() - lastUpdate) / 1000));
+          s += ' · updated ' + (ago === 0 ? 'just now' : ago + 's ago');
+        }
+        metaEl.textContent = s;
       }
 
       function passesFilter(level) {
@@ -123,41 +140,32 @@
         let visible = 0;
         view.querySelectorAll('.log-line').forEach(function (line) {
           const show = passesFilter(line.dataset.level);
-          line.style.display = show ? '' : 'none';
+          line.classList.toggle('hidden', !show);
           if (show) visible++;
         });
         emptyEl.style.display = visible === 0 ? '' : 'none';
+      }
+
+      function makeCell(cls, text) {
+        const el = document.createElement('span');
+        el.className = cls;
+        el.textContent = text;
+        return el;
       }
 
       function appendEntries(entries) {
         if (!entries.length) return;
         const frag = document.createDocumentFragment();
         entries.forEach(function (e) {
+          const level = e.level || 'INFO';
           const line = document.createElement('div');
-          line.className = 'log-line log-' + (e.level || 'INFO');
-          line.dataset.level = e.level || 'INFO';
-
-          const time = document.createElement('span');
-          time.className = 'log-time';
-          time.textContent = e.time;
-
-          const level = document.createElement('span');
-          level.className = 'log-level';
-          level.textContent = e.level;
-
-          const name = document.createElement('span');
-          name.className = 'log-name';
-          name.textContent = e.logger;
-
-          const msg = document.createElement('span');
-          msg.className = 'log-msg';
-          msg.textContent = e.message;
-
-          line.appendChild(time);
-          line.appendChild(level);
-          line.appendChild(name);
-          line.appendChild(msg);
-          if (!passesFilter(line.dataset.level)) line.style.display = 'none';
+          line.className = 'log-line log-' + level;
+          line.dataset.level = level;
+          line.appendChild(makeCell('log-time', e.time));
+          line.appendChild(makeCell('log-level', level));
+          line.appendChild(makeCell('log-name', e.logger));
+          line.appendChild(makeCell('log-msg', e.message));
+          if (!passesFilter(level)) line.classList.add('hidden');
           frag.appendChild(line);
         });
         emptyEl.style.display = 'none';
@@ -168,6 +176,7 @@
         if (lines.length > MAX_LINES) {
           for (let i = 0; i < lines.length - MAX_LINES; i++) lines[i].remove();
         }
+        lineCount = view.querySelectorAll('.log-line').length;
 
         if (autoscroll.checked) {
           view.scrollTop = view.scrollHeight;
@@ -178,10 +187,13 @@
         if (paused || inFlight) return;
         inFlight = true;
         try {
-          const res = await fetch('/api/logs?since=' + lastId, {
+          // Cache-bust so no browser/proxy layer can freeze the stream.
+          const res = await fetch('/api/logs?since=' + lastId + '&_=' + Date.now(), {
             headers: { 'Accept': 'application/json' },
+            cache: 'no-store',
           });
           if (res.status === 401) {
+            connected = false;
             setStatus('error', 'Session expired — reload the page');
             stop();
             return;
@@ -190,8 +202,12 @@
           const data = await res.json();
           if (typeof data.last_id === 'number') lastId = data.last_id;
           if (data.entries && data.entries.length) appendEntries(data.entries);
+          connected = true;
+          lastUpdate = Date.now();
           if (!paused) setStatus('live', 'Streaming');
+          renderMeta();
         } catch (err) {
+          connected = false;
           setStatus('error', 'Reconnecting…');
         } finally {
           inFlight = false;
@@ -199,13 +215,13 @@
       }
 
       function start() {
-        if (timer) return;
-        timer = setInterval(poll, POLL_INTERVAL);
-        poll();
+        if (!timer) { timer = setInterval(poll, POLL_INTERVAL); poll(); }
+        if (!heartbeat) { heartbeat = setInterval(renderMeta, 1000); }
       }
 
       function stop() {
         if (timer) { clearInterval(timer); timer = null; }
+        if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
       }
 
       pauseBtn.addEventListener('click', function () {
@@ -221,6 +237,8 @@
 
       clearBtn.addEventListener('click', function () {
         view.querySelectorAll('.log-line').forEach(function (l) { l.remove(); });
+        lineCount = 0;
+        renderMeta();
         emptyEl.style.display = '';
       });
 
@@ -228,13 +246,10 @@
 
       // Pause polling while the tab is hidden to save resources; resume on return.
       document.addEventListener('visibilitychange', function () {
-        if (document.hidden) {
-          stop();
-        } else {
-          start();
-        }
+        if (document.hidden) { stop(); } else { start(); }
       });
 
+      renderMeta();
       start();
     })();
   </script>

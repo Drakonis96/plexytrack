@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.2 (2026-07-09)
+
+### Logs page
+
+- **Reliable live refresh**: the Logs viewer now polls with cache-busting and the `/api/logs` (and `/api/sync_status`) responses send `no-store` / `X-Accel-Buffering: no` headers, so browser and reverse-proxy caching can no longer freeze the stream. A once-per-second heartbeat shows the line count and "updated Ns ago" so liveness is visible even during quiet periods.
+- **Clearer formatting**: log rows now use aligned, colour-coded level badges, zebra striping, row hover and proper message wrapping instead of a cramped single line.
+
+### Sync status accuracy
+
+- A run that aborts early without raising (e.g. a failed Plex connection test, which the pipeline logs instead of raising) is now reported as **error** on the Sync page instead of a misleading *success*.
+
 ## v0.5.1 (2026-07-09)
 
 ### Observability
