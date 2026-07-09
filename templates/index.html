@@ -135,7 +135,7 @@
                 </select>
               </div>
               <div class="checkbox-group">
-                <input type="checkbox" id="watchlists" name="watchlists" {% if watchlists %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
+                <input type="checkbox" id="watchlists" name="watchlists" {% if watchlists %}checked{% endif %}>
                 <label for="watchlists">Watchlists</label>
                 <select id="watchlists_direction" name="watchlists_direction" class="direction-select">
                   <option value="both" {% if watchlists_direction == 'both' %}selected{% endif %}>Bidirectional</option>

@@ -270,6 +270,114 @@ def sync_plex_watchlist_to_simkl(plex, headers: dict, target_list: str = "planto
     return len(movies) + len(shows)
 
 
+def _plex_watchlist_items(plex):
+    """Return the Plex Discover watchlist items (server or account object)."""
+    try:
+        return plex.watchlist() or []
+    except Exception:
+        try:
+            account = plex.myPlexAccount()
+            return account.watchlist() or []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to read Plex Discover watchlist: %s", exc)
+            return []
+
+
+def sync_watchlist_plex_simkl(plex, headers: dict, *, direction: str = "both") -> Tuple[int, int]:
+    """Bidirectionally sync the Plex Discover watchlist with Simkl plan-to-watch.
+
+    Plex Discover acts as the canonical hub. Additive only: an item present on
+    one side but missing on the other is added to the other side (nothing is
+    removed). ``direction`` mirrors the app's watchlist direction setting
+    (``both`` / ``plex_to_service`` / ``service_to_plex``).
+
+    Returns ``(added_to_simkl, added_to_plex)``. Items missing from the Plex
+    library cannot be added to the Discover watchlist and are skipped (same
+    behaviour as the Trakt watchlist sync).
+    """
+    watch_items = _plex_watchlist_items(plex)
+    plex_index: Dict[str, object] = {}
+    for item in watch_items:
+        guid = best_guid(item)
+        if guid:
+            plex_index[guid] = item
+
+    simkl_data = get_simkl_watchlist(headers)
+    simkl_index: Dict[str, dict] = {}
+    for m in simkl_data.get("movies", []) or []:
+        if (m.get("status") or m.get("list")) != "plantowatch":
+            continue
+        mv = m.get("movie", {}) or {}
+        guid = simkl_movie_key(mv)
+        if guid:
+            simkl_index[guid] = {"type": "movie", "ids": mv.get("ids", {})}
+    for s in simkl_data.get("shows", []) or []:
+        if (s.get("status") or s.get("list")) != "plantowatch":
+            continue
+        sh = s.get("show", {}) or {}
+        guid = simkl_movie_key(sh)
+        if guid:
+            simkl_index[guid] = {"type": "show", "ids": sh.get("ids", {})}
+
+    added_to_simkl = 0
+    added_to_plex = 0
+
+    # Plex Discover -> Simkl plan-to-watch
+    if direction in ("both", "plex_to_service"):
+        movies: List[dict] = []
+        shows: List[dict] = []
+        for guid, item in plex_index.items():
+            if guid in simkl_index:
+                continue
+            obj: Dict[str, Union[str, int, dict]] = {"title": getattr(item, "title", None)}
+            year = normalize_year(getattr(item, "year", None))
+            if year is not None:
+                obj["year"] = year
+            ids = guid_to_ids(guid)
+            if ids:
+                obj["ids"] = ids
+            if getattr(item, "type", "") == "movie":
+                movies.append(obj)
+            elif getattr(item, "type", "") in {"show", "season", "episode"}:
+                shows.append(obj)
+        if movies or shows:
+            add_items_to_simkl_list(
+                headers,
+                movies=movies or None,
+                shows=shows or None,
+                target_list="plantowatch",
+            )
+            added_to_simkl = len(movies) + len(shows)
+
+    # Simkl plan-to-watch -> Plex Discover
+    if direction in ("both", "service_to_plex"):
+        account = None
+        try:
+            account = plex.myPlexAccount()
+        except Exception:  # noqa: BLE001
+            account = None
+        to_add = []
+        for guid in simkl_index:
+            if guid in plex_index:
+                continue
+            item = find_item_by_guid(plex, guid)
+            if item is not None:
+                to_add.append(item)
+        if to_add and account is not None:
+            try:
+                account.addToWatchlist(to_add)
+                added_to_plex = len(to_add)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed adding items to Plex Discover watchlist: %s", exc)
+
+    if added_to_simkl or added_to_plex:
+        logger.info(
+            "Plex<->Simkl watchlist: +%d to Simkl plan-to-watch, +%d to Plex Discover",
+            added_to_simkl, added_to_plex,
+        )
+    return added_to_simkl, added_to_plex
+
+
 def simkl_movie_key(m: dict) -> Optional[str]:
     ids = m.get("ids", {})
     if ids.get("imdb"):

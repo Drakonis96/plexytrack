@@ -114,6 +114,7 @@ from simkl_utils import (
     update_saved_activities,
     sync_plex_playback_to_simkl,
     sync_playback_simkl_to_plex,
+    sync_watchlist_plex_simkl,
 )
 
 # --------------------------------------------------------------------------- #
@@ -1932,7 +1933,15 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
 
         mirror_trakt_watchlist_to_simkl(headers)
     elif SYNC_WATCHLISTS and active_provider == "simkl":
-        logger.warning("Watchlist sync with Simkl is not yet supported.")
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
+        try:
+            sync_watchlist_plex_simkl(
+                sync_plex, headers, direction=WATCHLISTS_SYNC_DIRECTION
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Simkl watchlist sync failed: %s", exc)
 
     if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
         if stop_event.is_set():
@@ -2546,9 +2555,10 @@ def index():
             )
 
         if SYNC_PROVIDER == "simkl":
+            # Watchlist is supported for Simkl; only collection/liked-lists are
+            # Trakt-only.
             SYNC_COLLECTION = False
             SYNC_LIKED_LISTS = False
-            SYNC_WATCHLISTS = False
 
         # Persist final settings to disk after applying restrictions
         save_settings()
@@ -2587,9 +2597,10 @@ def index():
     display_live_sync = LIVE_SYNC
 
     if SYNC_PROVIDER == "simkl":
+        # Collection and liked-lists remain Trakt-only; watchlist is supported
+        # for Simkl (Plex Discover <-> plan-to-watch).
         display_collection = False
         display_liked_lists = False
-        display_watchlists = False
 
     if selected_user and not selected_user.get("is_owner", False):
         # Disable restricted options in the UI for managed users
@@ -2662,9 +2673,10 @@ def sync_once():
         )
 
     if SYNC_PROVIDER == "simkl":
+        # Watchlist is supported for Simkl; only collection/liked-lists are
+        # Trakt-only.
         SYNC_COLLECTION = False
         SYNC_LIKED_LISTS = False
-        SYNC_WATCHLISTS = False
 
     save_settings()
 
