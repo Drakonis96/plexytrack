@@ -92,6 +92,12 @@ from trakt_utils import (
     fetch_trakt_watchlist,
     apply_trakt_ratings,
     restore_backup,
+    get_trakt_last_activities,
+    should_sync_category,
+    load_trakt_activities,
+    save_trakt_activities,
+    import_trakt_collection,
+    sync_personal_lists_to_plex,
 )
 from simkl_utils import (
     simkl_request,
@@ -101,6 +107,9 @@ from simkl_utils import (
     update_simkl,
     sync_simkl_ratings,
     apply_simkl_ratings,
+    get_simkl_last_activities,
+    has_simkl_category_changed,
+    update_saved_activities,
 )
 
 # --------------------------------------------------------------------------- #
@@ -1256,6 +1265,17 @@ def mirror_trakt_watchlist_to_simkl(headers) -> None:
         logger.warning("Could not mirror Trakt watchlist to Simkl: %s", exc)
 
 
+def _trakt_cat_changed(current, previous, category, key) -> bool:
+    """Return whether a Trakt category changed vs the previous activity snapshot.
+
+    Thin wrapper around :func:`should_sync_category` that pulls the previous
+    per-category timestamp out of the persisted snapshot. Fails open (returns
+    ``True``) whenever change cannot be proven.
+    """
+    prev_ts = (previous.get(category) or {}).get(key) if previous else None
+    return should_sync_category(current, prev_ts, category, key)
+
+
 def sync():
     """Run the main synchronization logic with selected user."""
     if not _sync_lock.acquire(blocking=False):
@@ -1324,6 +1344,20 @@ def _sync_inner():
             "Authorization": f"Bearer {os.environ.get('SIMKL_ACCESS_TOKEN')}",
             "simkl-api-key": os.environ["SIMKL_CLIENT_ID"],
         }
+
+    # --- Delta sync (incremental) ----------------------------------------- #
+    # Fetch the provider's last-activity timestamps once. These are read-only
+    # calls; when they succeed we can skip service -> Plex pulls whose category
+    # has not changed since the previous sync. Any failure leaves the snapshot
+    # as ``None`` and every category is pulled as before ("fail open").
+    trakt_activities = None
+    prev_trakt_activities = {}
+    simkl_activities = None
+    if SYNC_PROVIDER == "trakt" and headers:
+        trakt_activities = get_trakt_last_activities(headers)
+        prev_trakt_activities = load_trakt_activities()
+    elif SYNC_PROVIDER == "simkl" and headers:
+        simkl_activities = get_simkl_last_activities(headers)
 
     # Get history for the selected user
     account = get_plex_account()
@@ -1713,18 +1747,33 @@ def _sync_inner():
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            try:
-                apply_trakt_ratings(sync_plex, headers)
-            except Exception as exc:
-                logger.error("Ratings sync (Trakt -> Plex) failed: %s", exc)
+            ratings_changed = (
+                _trakt_cat_changed(trakt_activities, prev_trakt_activities, "movies", "rated_at")
+                or _trakt_cat_changed(trakt_activities, prev_trakt_activities, "episodes", "rated_at")
+                or _trakt_cat_changed(trakt_activities, prev_trakt_activities, "shows", "rated_at")
+                or _trakt_cat_changed(trakt_activities, prev_trakt_activities, "seasons", "rated_at")
+            )
+            if not ratings_changed:
+                logger.info("Skipping Trakt ratings import (delta): unchanged since last sync")
+            else:
+                try:
+                    apply_trakt_ratings(sync_plex, headers)
+                except Exception as exc:
+                    logger.error("Ratings sync (Trakt -> Plex) failed: %s", exc)
         elif SYNC_PROVIDER == "simkl" and selected_user.get("is_owner", False):
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            try:
-                apply_simkl_ratings(sync_plex, headers)
-            except Exception as exc:
-                logger.error("Ratings sync (Simkl -> Plex) failed: %s", exc)
+            m_changed, _ = has_simkl_category_changed("movies.rated_at", simkl_activities)
+            tv_changed, _ = has_simkl_category_changed("tv_shows.rated_at", simkl_activities)
+            anime_changed, _ = has_simkl_category_changed("anime.rated_at", simkl_activities)
+            if not (m_changed or tv_changed or anime_changed):
+                logger.info("Skipping Simkl ratings import (delta): unchanged since last sync")
+            else:
+                try:
+                    apply_simkl_ratings(sync_plex, headers)
+                except Exception as exc:
+                    logger.error("Ratings sync (Simkl -> Plex) failed: %s", exc)
 
     if SYNC_WATCHLISTS and SYNC_PROVIDER == "trakt":
         if stop_event.is_set():
@@ -1764,7 +1813,24 @@ def _sync_inner():
             logger.error("Collection sync failed: %s", exc)
 
     if SYNC_COLLECTION and COLLECTION_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_SERVICE_TO_PLEX):
-        logger.warning("Collection import from Trakt is not implemented.")
+        if SYNC_PROVIDER == "trakt":
+            if stop_event.is_set():
+                logger.info("Sync cancelled")
+                return
+            collection_changed = (
+                _trakt_cat_changed(trakt_activities, prev_trakt_activities, "movies", "collected_at")
+                or _trakt_cat_changed(trakt_activities, prev_trakt_activities, "episodes", "collected_at")
+                or _trakt_cat_changed(trakt_activities, prev_trakt_activities, "shows", "collected_at")
+            )
+            if not collection_changed:
+                logger.info("Skipping Trakt collection import (delta): unchanged since last sync")
+            else:
+                try:
+                    import_trakt_collection(sync_plex, headers)
+                except Exception as exc:
+                    logger.error("Collection import (Trakt -> Plex) failed: %s", exc)
+        elif SYNC_PROVIDER == "simkl":
+            logger.warning("Collection import from Simkl is not supported.")
 
     if SYNC_LIKED_LISTS and SYNC_PROVIDER == "trakt":
         if stop_event.is_set():
@@ -1775,6 +1841,9 @@ def _sync_inner():
                 logger.info("Starting liked lists sync (Trakt -> Plex)...")
                 sync_liked_lists(sync_plex, headers)
                 logger.info("Liked lists sync (Trakt -> Plex) completed.")
+                logger.info("Starting personal lists sync (Trakt -> Plex)...")
+                sync_personal_lists_to_plex(sync_plex, headers)
+                logger.info("Personal lists sync (Trakt -> Plex) completed.")
             if LISTS_SYNC_DIRECTION in (DIRECTION_BOTH, DIRECTION_PLEX_TO_SERVICE):
                 logger.info("Starting collections sync (Plex -> Trakt)...")
                 sync_collections_to_trakt(sync_plex, headers)
@@ -1788,6 +1857,15 @@ def _sync_inner():
 
     if SYNC_WATCHED:
         save_last_plex_sync(datetime.utcnow().isoformat() + "Z")
+
+    # Persist the activity snapshot so the next run can skip unchanged
+    # categories. Only stored after a full pass so a partial/aborted sync does
+    # not suppress a later pull.
+    if trakt_activities is not None:
+        save_trakt_activities(trakt_activities)
+    if simkl_activities is not None:
+        update_saved_activities(simkl_activities)
+
     logger.info("Sync finished.")
 
 

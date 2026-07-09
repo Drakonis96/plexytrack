@@ -14,6 +14,7 @@ from utils import (
     to_iso_z,
     find_item_by_guid,
     best_guid,
+    safe_timestamp_compare,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,11 @@ APP_NAME = "PlexyTrack"
 APP_VERSION = "v0.4.12"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
+STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
+# Snapshot of the last ``/sync/activities`` payload seen during a sync, used to
+# skip Simkl -> Plex pulls when a category has not changed.
+ACTIVITIES_FILE = os.path.join(STATE_DIR, "simkl_activities.json")
 SIMKL_LIST_STATUSES = {"plantowatch", "watching", "completed", "hold", "dropped"}
 
 
@@ -276,6 +281,216 @@ def simkl_movie_key(m: dict) -> Optional[str]:
     if ids.get("anidb"):
         return f"anidb://{ids['anidb']}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Delta sync (incremental) via /sync/activities
+# ---------------------------------------------------------------------------
+
+
+def get_simkl_last_activities(headers: dict) -> Optional[dict]:
+    """Return Simkl's ``/sync/activities`` payload or ``None`` on failure.
+
+    Simkl recommends calling this first on every sync: the payload carries
+    ``*_at``/status timestamps so we can pull only the categories that changed.
+    The endpoint is invoked with POST as documented.
+    """
+    try:
+        resp = simkl_request("POST", "/sync/activities", headers)
+        data = resp.json()
+        if isinstance(data, dict):
+            return data
+        logger.warning("Unexpected /sync/activities payload type: %s", type(data))
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch Simkl activities: %s", exc)
+        return None
+
+
+def _load_saved_activities() -> dict:
+    """Return the last persisted ``/sync/activities`` snapshot (or ``{}``)."""
+    if os.path.exists(ACTIVITIES_FILE):
+        try:
+            with open(ACTIVITIES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to load Simkl activities snapshot: %s", exc)
+    return {}
+
+
+def _save_activities(activities: dict) -> None:
+    """Persist the ``/sync/activities`` snapshot to disk."""
+    if not isinstance(activities, dict):
+        return
+    try:
+        os.makedirs(os.path.dirname(ACTIVITIES_FILE), exist_ok=True)
+        with open(ACTIVITIES_FILE, "w", encoding="utf-8") as f:
+            json.dump(activities, f, indent=2)
+        logger.debug("Saved Simkl activities snapshot to %s", ACTIVITIES_FILE)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to save Simkl activities snapshot: %s", exc)
+
+
+def update_saved_activities(activities: dict) -> None:
+    """Public wrapper to persist the latest activities snapshot."""
+    _save_activities(activities)
+
+
+def _dig(data: dict, dotted_path: str):
+    """Return ``data`` navigated through a dotted ``a.b.c`` path or ``None``."""
+    node = data
+    for part in dotted_path.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
+
+
+def has_simkl_category_changed(
+    category_path: str, current_activities: Optional[dict] = None
+) -> Tuple[bool, Optional[str]]:
+    """Return ``(changed, saved_timestamp)`` for a dotted activities path.
+
+    When ``current_activities`` is not provided we cannot prove the category is
+    unchanged, so we return ``changed=True`` (fail open). When it is provided we
+    compare the fresh timestamp against the saved one and only report
+    ``changed=False`` if the saved timestamp is equal or newer.
+    """
+    saved = _load_saved_activities()
+    saved_ts = _dig(saved, category_path)
+    if current_activities is None:
+        return True, saved_ts
+    current_ts = _dig(current_activities, category_path)
+    if current_ts is None or saved_ts is None:
+        return True, saved_ts
+    return safe_timestamp_compare(current_ts, saved_ts), saved_ts
+
+
+# ---------------------------------------------------------------------------
+# /sync/all-items (generic fetch + parsing, incl. hold / dropped statuses)
+# ---------------------------------------------------------------------------
+
+
+def get_simkl_all_items(
+    headers: dict,
+    media_type: Optional[str] = None,
+    *,
+    date_from: Optional[str] = None,
+    extended: Optional[str] = None,
+    episode_watched_at: bool = False,
+    status: Optional[str] = None,
+) -> dict:
+    """Return the user's Simkl list items via ``/sync/all-items``.
+
+    ``media_type`` restricts to ``movies``/``shows``/``anime``. ``date_from``
+    enables incremental fetches, ``status`` restricts to a single list
+    (``plantowatch``/``watching``/``completed``/``hold``/``dropped``). Returns
+    ``{}`` for empty/``null`` responses.
+    """
+    if media_type in {"movies", "shows", "anime"}:
+        endpoint = f"/sync/all-items/{media_type}/"
+        if status in SIMKL_LIST_STATUSES:
+            endpoint = f"/sync/all-items/{media_type}/{status}/"
+    else:
+        endpoint = "/sync/all-items"
+
+    params: dict = {}
+    if date_from:
+        params["date_from"] = date_from
+    if extended:
+        params["extended"] = extended
+    if episode_watched_at:
+        params["episode_watched_at"] = "yes"
+
+    resp = simkl_request("GET", endpoint, headers, params=params)
+    if not getattr(resp, "content", b"ok"):
+        return {}
+    data = resp.json()
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list) and media_type:
+        return {media_type: data}
+    return {}
+
+
+def parse_all_items_response(
+    data: dict,
+) -> Tuple[
+    Dict[str, Tuple[Optional[str], Optional[int], Optional[str]]],
+    Dict[object, Tuple[Optional[str], str, Optional[str]]],
+]:
+    """Parse an ``/sync/all-items`` payload into movie and episode maps.
+
+    Unlike :func:`get_simkl_history` this does **not** filter by watched status,
+    so callers can inspect any list (including ``hold``/``dropped``). Returns:
+
+    - movies: ``{guid: (title, year, last_watched_at)}``
+    - episodes: ``{key: (show_title, "S01E02", watched_at)}``
+    """
+    movies: Dict[str, Tuple[Optional[str], Optional[int], Optional[str]]] = {}
+    episodes: Dict[object, Tuple[Optional[str], str, Optional[str]]] = {}
+
+    if not isinstance(data, dict):
+        return movies, episodes
+
+    for movie_item in data.get("movies", []) or []:
+        m = movie_item.get("movie", {}) or {}
+        guid = simkl_movie_key(m)
+        if not guid or guid in movies:
+            continue
+        movies[guid] = (
+            m.get("title"),
+            normalize_year(m.get("year")),
+            movie_item.get("last_watched_at"),
+        )
+
+    for show_item in data.get("shows", []) or []:
+        show = show_item.get("show", {}) or {}
+        for season in show_item.get("seasons", []) or []:
+            season_num = season.get("number", 0)
+            for episode in season.get("episodes", []) or []:
+                episode_num = episode.get("number", 0)
+                e = {
+                    "season": season_num,
+                    "number": episode_num,
+                    "ids": episode.get("ids", {}) or {},
+                }
+                key = simkl_episode_key(show, e)
+                if not key or key in episodes:
+                    continue
+                episodes[key] = (
+                    show.get("title"),
+                    f"S{season_num:02d}E{episode_num:02d}",
+                    episode.get("watched_at"),
+                )
+
+    return movies, episodes
+
+
+def get_simkl_items_by_status(headers: dict, status: str) -> dict:
+    """Return Simkl list items filtered to a single ``status``.
+
+    Convenience wrapper exposing statuses such as ``hold`` and ``dropped`` that
+    :func:`get_simkl_history` intentionally excludes. Returns a dict with
+    ``movies`` and ``shows`` lists.
+    """
+    if status not in SIMKL_LIST_STATUSES:
+        raise ValueError(f"Invalid Simkl list status: {status}")
+
+    data = get_simkl_all_items(
+        headers, extended="full", episode_watched_at=True
+    )
+    result: Dict[str, list] = {"movies": [], "shows": []}
+    for movie_item in data.get("movies", []) or []:
+        item_status = movie_item.get("status") or movie_item.get("list") or ""
+        if item_status == status:
+            result["movies"].append(movie_item)
+    for show_item in data.get("shows", []) or []:
+        item_status = show_item.get("status") or show_item.get("list") or ""
+        if item_status == status:
+            result["shows"].append(show_item)
+    return result
 
 
 def get_simkl_history(

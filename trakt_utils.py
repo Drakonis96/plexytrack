@@ -36,6 +36,9 @@ CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
 STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
 AUTH_FILE = os.path.join(CONFIG_DIR, "auth.json")
 WATCHLIST_STATE_FILE = os.path.join(STATE_DIR, "watchlist_state.json")
+# Snapshot of the last ``/sync/last_activities`` payload seen during a sync.
+# Used to skip service -> Plex pulls when nothing changed on Trakt.
+ACTIVITIES_FILE = os.path.join(STATE_DIR, "trakt_activities.json")
 
 
 def load_watchlist_state() -> dict:
@@ -456,8 +459,94 @@ def update_trakt(headers: dict, movies: list, episodes: list) -> None:
     logger.info("Trakt history updated successfully.")
 
 
-def sync_collection(plex, headers):
+_RESOLUTION_MAP = {
+    "4k": "uhd_4k",
+    "1080": "hd_1080p",
+    "720": "hd_720p",
+    "576": "sd_576p",
+    "480": "sd_480p",
+    "sd": "sd_480p",
+}
+
+_AUDIO_MAP = {
+    "dca": "dts",
+    "dts": "dts",
+    "dts-hd": "dts_ma",
+    "dtshd": "dts_ma",
+    "ac3": "dolby_digital",
+    "eac3": "dolby_digital_plus",
+    "truehd": "dolby_truehd",
+    "aac": "aac",
+    "mp3": "mp3",
+    "mp2": "mp2",
+    "flac": "flac",
+    "pcm": "lpcm",
+    "lpcm": "lpcm",
+    "opus": "ogg_opus",
+    "vorbis": "ogg",
+    "wmapro": "wma",
+}
+
+_AUDIO_CHANNEL_MAP = {
+    1: "1.0",
+    2: "2.0",
+    3: "2.1",
+    4: "4.0",
+    5: "5.0",
+    6: "5.1",
+    7: "6.1",
+    8: "7.1",
+    10: "9.1",
+}
+
+
+def _extract_collection_metadata(item) -> dict:
+    """Return Trakt collection ``metadata`` extracted from a Plex item.
+
+    Every field is optional and only included when it can be safely mapped to
+    one of Trakt's documented enum values, so an unknown codec/resolution is
+    simply omitted rather than sent as an invalid value.
+    """
+    metadata: dict = {}
+    try:
+        media_list = getattr(item, "media", None) or []
+        if not media_list:
+            return metadata
+        media = media_list[0]
+
+        resolution = str(getattr(media, "videoResolution", "") or "").lower()
+        if resolution in _RESOLUTION_MAP:
+            metadata["resolution"] = _RESOLUTION_MAP[resolution]
+
+        audio_codec = str(getattr(media, "audioCodec", "") or "").lower()
+        if audio_codec in _AUDIO_MAP:
+            metadata["audio"] = _AUDIO_MAP[audio_codec]
+
+        channels = getattr(media, "audioChannels", None)
+        try:
+            channels = int(channels) if channels is not None else None
+        except (TypeError, ValueError):
+            channels = None
+        if channels in _AUDIO_CHANNEL_MAP:
+            metadata["audio_channels"] = _AUDIO_CHANNEL_MAP[channels]
+
+        # Best-effort HDR detection – attributes vary across PlexAPI versions.
+        if getattr(media, "DOVIPresent", False):
+            metadata["hdr"] = "dolby_vision"
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed extracting collection metadata: %s", exc)
+    return metadata
+
+
+def sync_collection(plex, headers, *, include_shows: bool = True):
+    """Push the Plex library to the Trakt collection (movies and, optionally, shows).
+
+    Movies carry technical ``metadata`` (resolution/audio/HDR) when available.
+    Shows are collected at episode granularity using the seasons/episodes
+    structure Trakt expects.
+    """
     movies = []
+    shows = []
     for section in plex.library.sections():
         if section.type == "movie":
             for item in section.all():
@@ -467,10 +556,49 @@ def sync_collection(plex, headers):
                     obj["year"] = normalize_year(item.year)
                 if guid:
                     obj["ids"] = guid_to_ids(guid)
+                metadata = _extract_collection_metadata(item)
+                if metadata:
+                    obj["metadata"] = metadata
                 movies.append(obj)
+        elif section.type == "show" and include_shows:
+            for show in section.all():
+                guid = best_guid(show)
+                seasons_map: Dict[int, list] = {}
+                try:
+                    episodes = show.episodes()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Failed listing episodes for %s: %s", getattr(show, "title", "?"), exc)
+                    episodes = []
+                for ep in episodes:
+                    s_idx = getattr(ep, "seasonNumber", None)
+                    e_idx = getattr(ep, "index", None)
+                    if s_idx is None or e_idx is None:
+                        continue
+                    seasons_map.setdefault(int(s_idx), []).append({"number": int(e_idx)})
+                if not seasons_map:
+                    continue
+                show_obj = {"title": show.title}
+                if getattr(show, "year", None):
+                    show_obj["year"] = normalize_year(show.year)
+                if guid:
+                    show_obj["ids"] = guid_to_ids(guid)
+                show_obj["seasons"] = [
+                    {"number": s_num, "episodes": eps}
+                    for s_num, eps in sorted(seasons_map.items())
+                ]
+                shows.append(show_obj)
+
+    payload: Dict[str, list] = {}
     if movies:
-        trakt_request("POST", "/sync/collection", headers, json={"movies": movies})
-        logger.info("Synced %d Plex movies to Trakt collection", len(movies))
+        payload["movies"] = movies
+    if shows:
+        payload["shows"] = shows
+    if payload:
+        trakt_request("POST", "/sync/collection", headers, json=payload)
+        logger.info(
+            "Synced %d movies and %d shows to Trakt collection",
+            len(movies), len(shows),
+        )
 
 
 def sync_ratings(plex, headers):
@@ -631,6 +759,138 @@ def apply_trakt_ratings(plex, headers):
         logger.info("Applied %d ratings from Trakt to Plex", count)
 
 
+# ---------------------------------------------------------------------------
+# Delta sync (incremental) via /sync/last_activities
+# ---------------------------------------------------------------------------
+
+
+def get_trakt_last_activities(headers: dict) -> Optional[dict]:
+    """Return Trakt's ``/sync/last_activities`` payload or ``None`` on failure.
+
+    The payload contains ``*_at`` timestamps describing when each category of a
+    user's data (watched, rated, collected, watchlisted, …) last changed. It is
+    a read-only call and lets us skip Trakt -> Plex pulls when nothing changed.
+    """
+    try:
+        resp = trakt_request("GET", "/sync/last_activities", headers)
+        data = resp.json()
+        if isinstance(data, dict):
+            return data
+        logger.warning("Unexpected /sync/last_activities payload type: %s", type(data))
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch Trakt last_activities: %s", exc)
+        return None
+
+
+def should_sync_category(
+    activities: Optional[dict],
+    last_sync: Optional[str],
+    category: str,
+    key: str,
+) -> bool:
+    """Decide whether a Trakt category changed since ``last_sync``.
+
+    Returns ``True`` (i.e. "sync it") whenever we cannot prove the category is
+    unchanged: missing activities, no previous sync timestamp, the category not
+    present in the payload, or an activity newer than ``last_sync``. Only when
+    the recorded activity is older than or equal to ``last_sync`` do we return
+    ``False`` and skip the pull. This "fail open" behaviour keeps delta sync
+    100% safe – at worst it behaves exactly like a full sync.
+    """
+    if not activities or not last_sync:
+        return True
+    cat = activities.get(category)
+    if not isinstance(cat, dict):
+        return True
+    activity_ts = cat.get(key)
+    if not activity_ts:
+        return True
+    return safe_timestamp_compare(activity_ts, last_sync)
+
+
+def load_trakt_activities() -> dict:
+    """Return the last persisted ``/sync/last_activities`` snapshot."""
+    if os.path.exists(ACTIVITIES_FILE):
+        try:
+            with open(ACTIVITIES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to load Trakt activities snapshot: %s", exc)
+    return {}
+
+
+def save_trakt_activities(activities: dict) -> None:
+    """Persist the latest ``/sync/last_activities`` snapshot to disk."""
+    if not isinstance(activities, dict):
+        return
+    try:
+        os.makedirs(os.path.dirname(ACTIVITIES_FILE), exist_ok=True)
+        with open(ACTIVITIES_FILE, "w", encoding="utf-8") as f:
+            json.dump(activities, f, indent=2)
+        logger.debug("Saved Trakt activities snapshot to %s", ACTIVITIES_FILE)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to save Trakt activities snapshot: %s", exc)
+
+
+def import_trakt_collection(plex, headers, collection_name: str = "Trakt Collection") -> None:
+    """Mirror the user's Trakt collection into a Plex collection.
+
+    Reads ``/sync/collection/movies`` and ``/sync/collection/shows`` (both
+    read-only) and, for every item that also exists in the Plex library, adds
+    it to a Plex collection named ``collection_name``. Items missing from Plex
+    are simply skipped – nothing is ever created or deleted in the library.
+    """
+    for endpoint, media_key in (
+        ("/sync/collection/movies", "movie"),
+        ("/sync/collection/shows", "show"),
+    ):
+        try:
+            items = trakt_request("GET", endpoint, headers).json()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to fetch Trakt collection (%s): %s", endpoint, exc)
+            continue
+        if not items:
+            continue
+
+        by_section: Dict[object, list] = {}
+        for it in items:
+            data = it.get(media_key, {}) or {}
+            ids = data.get("ids", {}) or {}
+            guid = None
+            if ids.get("imdb"):
+                guid = f"imdb://{ids['imdb']}"
+            elif ids.get("tmdb"):
+                guid = f"tmdb://{ids['tmdb']}"
+            elif ids.get("tvdb"):
+                guid = f"tvdb://{ids['tvdb']}"
+            if not guid:
+                continue
+            plex_item = find_item_by_guid(plex, guid)
+            if not plex_item:
+                continue
+            sid = getattr(plex_item, "librarySectionID", None)
+            by_section.setdefault(sid, []).append(plex_item)
+
+        for sid, plex_items in by_section.items():
+            if not plex_items:
+                continue
+            try:
+                section = plex.library.sectionByID(sid)
+                coll = ensure_collection(
+                    plex, section, collection_name, first_item=plex_items[0]
+                )
+                if len(plex_items) > 1:
+                    coll.addItems(plex_items[1:])
+                logger.info(
+                    "Imported %d %s(s) from Trakt collection into '%s'",
+                    len(plex_items), media_key, collection_name,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed importing Trakt collection into Plex: %s", exc)
+
+
 def sync_liked_lists(plex, headers):
     try:
         likes = trakt_request("GET", "/users/likes/lists", headers).json()
@@ -747,6 +1007,177 @@ def sync_collections_to_trakt(plex, headers):
                     logger.info("Updated Trakt list %s with %d items", slug, len(movies) + len(shows))
                 except Exception as exc:
                     logger.error("Failed updating list %s: %s", slug, exc)
+
+
+# ---------------------------------------------------------------------------
+# Personal lists (all lists owned by the user, not only "liked" ones)
+# ---------------------------------------------------------------------------
+
+
+def get_trakt_personal_lists(headers: dict) -> list:
+    """Return every personal list owned by the authenticated user.
+
+    Read-only wrapper over ``GET /users/me/lists``. Returns an empty list on
+    failure so callers can treat it as "no lists".
+    """
+    try:
+        data = trakt_request("GET", "/users/me/lists", headers).json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Trakt personal lists: %s", exc)
+        return []
+
+
+def get_trakt_list_items(headers: dict, list_id, media_type: Optional[str] = None) -> list:
+    """Return the items of a personal list (read-only).
+
+    ``list_id`` may be a numeric Trakt id or a list slug. ``media_type`` can
+    restrict the response to ``movies`` or ``shows``.
+    """
+    endpoint = f"/users/me/lists/{list_id}/items"
+    if media_type in {"movie", "movies", "show", "shows"}:
+        endpoint += f"/{media_type}"
+    try:
+        data = trakt_request("GET", endpoint, headers).json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch items for Trakt list %s: %s", list_id, exc)
+        return []
+
+
+def sync_personal_lists_to_plex(plex, headers) -> None:
+    """Mirror every personal Trakt list into a matching Plex collection.
+
+    This complements ``sync_liked_lists`` (which only handles lists the user
+    *liked*) by also importing the lists the user *owns*. Items absent from the
+    Plex library are skipped; nothing in Plex is deleted.
+    """
+    lists = get_trakt_personal_lists(headers)
+    for lst in lists:
+        slug = lst.get("ids", {}).get("slug") or lst.get("ids", {}).get("trakt")
+        name = lst.get("name") or slug
+        if not slug:
+            continue
+        items = get_trakt_list_items(headers, slug)
+        movie_items = []
+        show_items = []
+        for it in items:
+            typ = it.get("type")
+            if not typ:
+                continue
+            data = it.get(typ, {}) or {}
+            ids = data.get("ids", {}) or {}
+            guid = None
+            if ids.get("imdb"):
+                guid = f"imdb://{ids['imdb']}"
+            elif ids.get("tmdb"):
+                guid = f"tmdb://{ids['tmdb']}"
+            elif ids.get("tvdb"):
+                guid = f"tvdb://{ids['tvdb']}"
+            if not guid:
+                continue
+            plex_item = find_item_by_guid(plex, guid)
+            if not plex_item:
+                continue
+            if plex_item.TYPE == "movie":
+                movie_items.append(plex_item)
+            elif plex_item.TYPE == "show":
+                show_items.append(plex_item)
+        if not (movie_items or show_items):
+            continue
+        for sec in plex.library.sections():
+            if sec.type == "movie" and movie_items:
+                coll = ensure_collection(plex, sec, name, first_item=movie_items[0])
+                try:
+                    if len(movie_items) > 1:
+                        coll.addItems(movie_items[1:])
+                except Exception:  # noqa: BLE001
+                    pass
+            if sec.type == "show" and show_items:
+                coll = ensure_collection(plex, sec, name, first_item=show_items[0])
+                try:
+                    if len(show_items) > 1:
+                        coll.addItems(show_items[1:])
+                except Exception:  # noqa: BLE001
+                    pass
+        logger.info(
+            "Imported Trakt list '%s' (%d movies, %d shows) into Plex",
+            name, len(movie_items), len(show_items),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Watchlist helpers with ordering and per-item notes support
+# ---------------------------------------------------------------------------
+
+
+def get_trakt_watchlist(
+    headers: dict,
+    media_type: str = "movies",
+    *,
+    sort_by: Optional[str] = None,
+    sort_how: Optional[str] = None,
+) -> list:
+    """Return watchlist items, optionally sorted server-side.
+
+    ``sort_by`` is one of ``rank``, ``added``, ``released``, ``title`` and
+    ``sort_how`` is ``asc``/``desc``. Per Trakt's official docs these are sent
+    as the ``sort_by``/``sort_how`` query parameters (the response echoes them
+    back via the ``X-Applied-Sort-By``/``X-Applied-Sort-How`` headers). They are
+    only included when provided, so the default call is unchanged.
+    """
+    endpoint = f"/sync/watchlist/{media_type}"
+    params: Dict[str, str] = {}
+    if sort_by:
+        params["sort_by"] = sort_by
+    if sort_how:
+        params["sort_how"] = sort_how
+    try:
+        data = trakt_request("GET", endpoint, headers, params=params).json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to fetch Trakt watchlist (%s): %s", media_type, exc)
+        return []
+
+
+def add_to_trakt_watchlist(
+    headers: dict,
+    movies: Optional[list] = None,
+    shows: Optional[list] = None,
+    episodes: Optional[list] = None,
+    *,
+    notes: Optional[str] = None,
+) -> Optional[dict]:
+    """Add items to the Trakt watchlist, optionally attaching ``notes``.
+
+    ``notes`` (a VIP-only Trakt feature) is only included per item when a value
+    is provided, so non-VIP callers are unaffected. Returns the parsed response
+    or ``None`` when there is nothing to add / on error.
+    """
+    payload: Dict[str, list] = {}
+
+    def _prep(items):
+        prepared = []
+        for it in items or []:
+            obj = dict(it)
+            if notes:
+                obj.setdefault("notes", notes)
+            prepared.append(obj)
+        return prepared
+
+    if movies:
+        payload["movies"] = _prep(movies)
+    if shows:
+        payload["shows"] = _prep(shows)
+    if episodes:
+        payload["episodes"] = _prep(episodes)
+    if not payload:
+        return None
+    try:
+        return trakt_request("POST", "/sync/watchlist", headers, json=payload).json()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to add items to Trakt watchlist: %s", exc)
+        return None
 
 
 def sync_watchlist(
