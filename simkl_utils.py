@@ -493,6 +493,190 @@ def get_simkl_items_by_status(headers: dict, status: str) -> dict:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Scrobble lifecycle + playback progress ("continue watching")
+# ---------------------------------------------------------------------------
+
+# Only mirror partially-watched items (below = noise, at/above = ~finished).
+PLAYBACK_MIN_PROGRESS = 1.0
+PLAYBACK_MAX_PROGRESS = 90.0
+
+
+def _build_scrobble_payload(item_data: dict, progress: float) -> dict:
+    """Build a Simkl scrobble payload for a movie or episode.
+
+    ``item_data`` for a movie: ``{type, title, year, ids}``.
+    For an episode: ``{type, show_title, show_year, show_ids, season, episode,
+    episode_ids}``.
+    """
+    payload: dict = {"progress": progress}
+    if item_data.get("type") == "episode":
+        episode = {
+            "season": item_data.get("season"),
+            "number": item_data.get("episode"),
+        }
+        if item_data.get("episode_ids"):
+            episode["ids"] = item_data["episode_ids"]
+        payload["episode"] = episode
+        show = {"title": item_data.get("show_title")}
+        if item_data.get("show_year") is not None:
+            show["year"] = item_data.get("show_year")
+        if item_data.get("show_ids"):
+            show["ids"] = item_data["show_ids"]
+        payload["show"] = show
+    else:
+        movie = {"title": item_data.get("title")}
+        if item_data.get("year") is not None:
+            movie["year"] = item_data.get("year")
+        if item_data.get("ids"):
+            movie["ids"] = item_data["ids"]
+        payload["movie"] = movie
+    return payload
+
+
+def _simkl_scrobble(headers: dict, action: str, item_data: dict, progress: float) -> bool:
+    payload = _build_scrobble_payload(item_data, progress)
+    try:
+        simkl_request("POST", f"/scrobble/{action}", headers, json=payload)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Simkl scrobble/%s failed: %s", action, exc)
+        return False
+
+
+def simkl_scrobble_start(headers: dict, item_data: dict, progress: float = 0.0) -> bool:
+    """Start a Simkl watching session (``POST /scrobble/start``)."""
+    return _simkl_scrobble(headers, "start", item_data, progress)
+
+
+def simkl_scrobble_pause(headers: dict, item_data: dict, progress: float) -> bool:
+    """Save a resume point on Simkl (``POST /scrobble/pause``)."""
+    return _simkl_scrobble(headers, "pause", item_data, progress)
+
+
+def simkl_scrobble_stop(headers: dict, item_data: dict, progress: float = 100.0) -> bool:
+    """End a Simkl session (``POST /scrobble/stop``); marks watched if >= 80%."""
+    return _simkl_scrobble(headers, "stop", item_data, progress)
+
+
+def get_simkl_playback_progress(headers: dict) -> list:
+    """Return saved Simkl playback sessions (``GET /sync/playback``). ``[]`` on error."""
+    try:
+        resp = simkl_request("GET", "/sync/playback", headers)
+        data = resp.json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch Simkl playback progress: %s", exc)
+        return []
+
+
+def delete_simkl_playback_item(headers: dict, playback_id) -> bool:
+    """Delete a Simkl saved playback item (``DELETE /sync/playback/{id}``)."""
+    try:
+        resp = simkl_request("DELETE", f"/sync/playback/{playback_id}", headers)
+        return getattr(resp, "status_code", 200) in (200, 204)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to remove Simkl playback %s: %s", playback_id, exc)
+        return False
+
+
+def _plex_item_to_scrobble_data(item) -> Optional[dict]:
+    """Translate a Plex item into Simkl scrobble ``item_data``."""
+    guid = best_guid(item)
+    ids = guid_to_ids(guid) if guid else {}
+    item_type = getattr(item, "type", None)
+    if item_type == "movie":
+        return {
+            "type": "movie",
+            "title": getattr(item, "title", None),
+            "year": normalize_year(getattr(item, "year", None)),
+            "ids": ids,
+        }
+    if item_type == "episode":
+        return {
+            "type": "episode",
+            "show_title": getattr(item, "grandparentTitle", None),
+            "season": getattr(item, "parentIndex", None) or getattr(item, "seasonNumber", None),
+            "episode": getattr(item, "index", None),
+            "episode_ids": ids,
+            "show_ids": {},
+        }
+    return None
+
+
+def sync_plex_playback_to_simkl(plex, headers: dict) -> int:
+    """Push Plex in-progress resume points to Simkl via ``/scrobble/pause``.
+
+    Returns the number of items whose progress was sent.
+    """
+    try:
+        deck = plex.library.onDeck()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to read Plex on-deck: %s", exc)
+        return 0
+
+    count = 0
+    for item in deck or []:
+        view_offset = getattr(item, "viewOffset", 0) or 0
+        duration = getattr(item, "duration", 0) or 0
+        if view_offset <= 0 or duration <= 0:
+            continue
+        progress = view_offset / duration * 100.0
+        if progress < PLAYBACK_MIN_PROGRESS or progress >= PLAYBACK_MAX_PROGRESS:
+            continue
+        item_data = _plex_item_to_scrobble_data(item)
+        if not item_data:
+            continue
+        if simkl_scrobble_pause(headers, item_data, round(progress, 2)):
+            count += 1
+    if count:
+        logger.info("Pushed %d Plex resume point(s) to Simkl", count)
+    return count
+
+
+def sync_playback_simkl_to_plex(plex, headers: dict) -> int:
+    """Apply Simkl saved playback progress to matching Plex items.
+
+    Returns the number of Plex items whose resume point was updated.
+    """
+    items = get_simkl_playback_progress(headers)
+    count = 0
+    for it in items:
+        progress = it.get("progress")
+        if progress is None:
+            continue
+        plex_item = None
+        try:
+            if it.get("movie"):
+                guid = simkl_movie_key(it["movie"])
+                plex_item = find_item_by_guid(plex, guid) if guid else None
+            elif it.get("show") and it.get("episode"):
+                guid = simkl_movie_key(it["show"])
+                show_item = find_item_by_guid(plex, guid) if guid else None
+                ep = it["episode"]
+                if show_item is not None:
+                    plex_item = show_item.episode(
+                        season=ep.get("season"), episode=ep.get("number")
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to resolve Plex item for Simkl playback: %s", exc)
+            continue
+        if plex_item is None:
+            continue
+        duration = getattr(plex_item, "duration", 0) or 0
+        if duration <= 0:
+            continue
+        offset = int(duration * float(progress) / 100.0)
+        try:
+            plex_item.updateTimeline(offset, state="paused", duration=duration)
+            count += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to set Plex resume point from Simkl: %s", exc)
+    if count:
+        logger.info("Applied %d resume point(s) from Simkl to Plex", count)
+    return count
+
+
 def get_simkl_history(
     headers: dict, *, date_from: Optional[str] = None
 ) -> Tuple[

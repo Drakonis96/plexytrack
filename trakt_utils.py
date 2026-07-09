@@ -891,6 +891,158 @@ def import_trakt_collection(plex, headers, collection_name: str = "Trakt Collect
                 logger.error("Failed importing Trakt collection into Plex: %s", exc)
 
 
+# ---------------------------------------------------------------------------
+# Playback progress ("continue watching") sync
+# ---------------------------------------------------------------------------
+
+# Only mirror partially-watched items: below this a resume point is noise, at or
+# above it Trakt/Plex already consider the item (nearly) finished.
+PLAYBACK_MIN_PROGRESS = 1.0
+PLAYBACK_MAX_PROGRESS = 90.0
+
+
+def _ids_to_guid(ids: dict) -> Optional[str]:
+    """Return an ``imdb://``/``tmdb://``/``tvdb://`` guid from a Trakt ids dict."""
+    if not isinstance(ids, dict):
+        return None
+    if ids.get("imdb"):
+        return f"imdb://{ids['imdb']}"
+    if ids.get("tmdb"):
+        return f"tmdb://{ids['tmdb']}"
+    if ids.get("tvdb"):
+        return f"tvdb://{ids['tvdb']}"
+    return None
+
+
+def get_trakt_playback(headers: dict) -> list:
+    """Return the user's saved playback progress (``GET /sync/playback``).
+
+    Read-only; returns an empty list on failure.
+    """
+    try:
+        data = trakt_request("GET", "/sync/playback", headers).json()
+        return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch Trakt playback progress: %s", exc)
+        return []
+
+
+def remove_trakt_playback(headers: dict, playback_id) -> bool:
+    """Delete a saved playback item (``DELETE /sync/playback/{id}``)."""
+    try:
+        resp = trakt_request("DELETE", f"/sync/playback/{playback_id}", headers)
+        return getattr(resp, "status_code", 200) in (200, 204)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to remove Trakt playback %s: %s", playback_id, exc)
+        return False
+
+
+def sync_playback_plex_to_trakt(plex, headers) -> int:
+    """Push Plex in-progress resume points to Trakt via ``/scrobble/pause``.
+
+    Returns the number of items whose progress was sent.
+    """
+    count = 0
+    for section in plex.library.sections():
+        if section.type == "movie":
+            try:
+                candidates = section.search()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Playback search failed for %s: %s", getattr(section, "title", "?"), exc)
+                continue
+        elif section.type == "show":
+            try:
+                candidates = section.search(libtype="episode")
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Episode playback search failed for %s: %s", getattr(section, "title", "?"), exc)
+                continue
+        else:
+            continue
+
+        for item in candidates:
+            view_offset = getattr(item, "viewOffset", 0) or 0
+            duration = getattr(item, "duration", 0) or 0
+            if view_offset <= 0 or duration <= 0:
+                continue
+            progress = view_offset / duration * 100.0
+            if progress < PLAYBACK_MIN_PROGRESS or progress >= PLAYBACK_MAX_PROGRESS:
+                continue
+            guid = best_guid(item)
+            if not guid:
+                continue
+            ids = guid_to_ids(guid)
+            if not ids:
+                continue
+            payload = {"progress": round(progress, 2)}
+            item_type = getattr(item, "type", None) or getattr(item, "TYPE", None)
+            if item_type == "movie":
+                obj = {"ids": ids}
+                if getattr(item, "title", None):
+                    obj["title"] = item.title
+                if getattr(item, "year", None):
+                    obj["year"] = normalize_year(item.year)
+                payload["movie"] = obj
+            elif item_type == "episode":
+                payload["episode"] = {"ids": ids}
+            else:
+                continue
+            try:
+                trakt_request("POST", "/scrobble/pause", headers, json=payload)
+                count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Failed to push playback for %s: %s", getattr(item, "title", "?"), exc)
+    if count:
+        logger.info("Pushed %d Plex resume point(s) to Trakt", count)
+    return count
+
+
+def sync_playback_trakt_to_plex(plex, headers) -> int:
+    """Apply Trakt saved playback progress to matching Plex items.
+
+    Uses ``item.updateTimeline`` so the resume point shows up in Plex's
+    "Continue Watching". Returns the number of items updated.
+    """
+    items = get_trakt_playback(headers)
+    count = 0
+    for it in items:
+        typ = it.get("type")
+        progress = it.get("progress")
+        if progress is None or not typ:
+            continue
+        media = it.get(typ, {}) or {}
+        ids = media.get("ids", {}) or {}
+        guid = _ids_to_guid(ids)
+        plex_item = None
+        try:
+            if typ == "movie":
+                plex_item = find_item_by_guid(plex, guid) if guid else None
+            elif typ == "episode":
+                show_ids = it.get("show", {}).get("ids", {}) or {}
+                show_guid = _ids_to_guid(show_ids)
+                show_item = find_item_by_guid(plex, show_guid) if show_guid else None
+                if show_item is not None:
+                    plex_item = show_item.episode(
+                        season=media.get("season"), episode=media.get("number")
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to resolve Plex item for playback: %s", exc)
+            continue
+        if plex_item is None:
+            continue
+        duration = getattr(plex_item, "duration", 0) or 0
+        if duration <= 0:
+            continue
+        offset = int(duration * float(progress) / 100.0)
+        try:
+            plex_item.updateTimeline(offset, state="paused", duration=duration)
+            count += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to set Plex resume point: %s", exc)
+    if count:
+        logger.info("Applied %d resume point(s) from Trakt to Plex", count)
+    return count
+
+
 def sync_liked_lists(plex, headers):
     try:
         likes = trakt_request("GET", "/users/likes/lists", headers).json()
