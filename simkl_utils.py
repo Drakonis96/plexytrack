@@ -602,6 +602,103 @@ def get_simkl_items_by_status(headers: dict, status: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Anime handling & cross-service id matching
+# ---------------------------------------------------------------------------
+
+
+def is_anime_item(item: dict) -> bool:
+    """Return whether an item is anime.
+
+    True when it carries a MyAnimeList or AniDB id (which only anime have) or an
+    explicit ``anime_type``. Regular movies/shows return False.
+    """
+    if not isinstance(item, dict):
+        return False
+    if item.get("anime_type"):
+        return True
+    ids = item.get("ids", {}) or {}
+    return bool(ids.get("mal") or ids.get("anidb"))
+
+
+def update_simkl_anime(
+    headers: dict, anime: list, use_tvdb_anime_seasons: bool = False
+) -> dict:
+    """Add anime shows to Simkl, handling TVDB/TMDB anime season numbering.
+
+    TVDB and TMDB number anime seasons differently from MAL/AniDB, so when an
+    anime is matched via a TVDB/TMDB id you must set ``use_tvdb_anime_seasons``
+    so Simkl maps the seasons/episodes correctly (per Simkl's "Handling Anime
+    Seasons with TVDB/TMDB IDs"). ``anime`` is a list of show dicts
+    (``title``/``year``/``ids``/``seasons``/optional ``status``). Returns the
+    parsed response, or ``{}`` for an empty input / on error.
+    """
+    if not anime:
+        return {}
+    shows = []
+    for a in anime:
+        obj = dict(a)
+        if use_tvdb_anime_seasons:
+            obj["use_tvdb_anime_seasons"] = True
+        shows.append(obj)
+    try:
+        resp = simkl_request("POST", "/sync/history", headers, json={"shows": shows})
+        return resp.json() if getattr(resp, "content", None) else {}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to update Simkl anime: %s", exc)
+        return {}
+
+
+def _parse_simkl_id_from_url(url: str) -> Optional[str]:
+    """Extract the numeric Simkl id from a redirect URL like /anime/12345/slug."""
+    if not url:
+        return None
+    import re
+
+    m = re.search(r"/(?:anime|tv|movies?|shows?)/(\d+)", url)
+    return m.group(1) if m else None
+
+
+def resolve_anime_ids(headers: dict, ids: dict, *, is_movie: bool = False) -> dict:
+    """Resolve an item's full external id set via Simkl's id graph.
+
+    Anime is frequently known by different ids on each service (Plex/AniDB,
+    Trakt/TVDB, Simkl/MAL). Given any known id, this uses Simkl's ``/redirect``
+    (the documented "search by id" mechanism) to find the Simkl id, then reads
+    the cached detail endpoint to return the merged ids (mal/anidb/tvdb/tmdb/
+    imdb/simkl) so the item can be matched on the other services. Returns ``{}``
+    on any failure so callers can fall back to their existing key.
+    """
+    if not isinstance(ids, dict):
+        return {}
+    params = {"to": "Simkl"}
+    for key in ("imdb", "tmdb", "tvdb", "mal", "anidb", "anilist"):
+        if ids.get(key):
+            params[key] = ids[key]
+    if len(params) <= 1:  # only "to" – nothing to resolve from
+        return {}
+    try:
+        redirect = simkl_request(
+            "GET", "/redirect", headers, params=params, allow_redirects=False
+        )
+        location = ""
+        if hasattr(redirect, "headers"):
+            location = redirect.headers.get("Location", "") or ""
+        simkl_id = _parse_simkl_id_from_url(location)
+        if not simkl_id:
+            return {}
+        detail_ep = f"/movies/{simkl_id}" if is_movie else f"/anime/{simkl_id}"
+        detail = simkl_request("GET", detail_ep, headers, params={"extended": "full"})
+        data = detail.json()
+        if isinstance(data, dict):
+            merged = dict(data.get("ids", {}) or {})
+            merged.setdefault("simkl", simkl_id)
+            return merged
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Anime id resolution failed: %s", exc)
+    return {}
+
+
+# ---------------------------------------------------------------------------
 # Scrobble lifecycle + playback progress ("continue watching")
 # ---------------------------------------------------------------------------
 

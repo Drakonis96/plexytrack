@@ -43,7 +43,11 @@ BRIDGE_SIMKL_TO_TRAKT = "simkl_to_trakt"
 
 
 def _ids_key(ids) -> Optional[str]:
-    """Return a stable ``imdb://``/``tmdb://``/``tvdb://`` key for an ids dict."""
+    """Return a stable id key for an ids dict.
+
+    Falls back to ``anidb`` so anime known only by its AniDB id (common for
+    Plex/Simkl anime) can still be matched across services.
+    """
     if not isinstance(ids, dict):
         return None
     if ids.get("imdb"):
@@ -52,6 +56,8 @@ def _ids_key(ids) -> Optional[str]:
         return f"tmdb://{ids['tmdb']}"
     if ids.get("tvdb"):
         return f"tvdb://{ids['tvdb']}"
+    if ids.get("anidb"):
+        return f"anidb://{ids['anidb']}"
     return None
 
 
