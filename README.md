@@ -4,16 +4,25 @@
   <img src="static/logo2.png" alt="PlexyTrack Logo" width="200" />
 </p>
 
-This project synchronizes your Plex library with Trakt or Simkl. Besides watched history it can optionally add items to your Trakt collection, sync ratings and watchlists, and now mirrors Trakt lists you like as Plex collections. Collections created in Plex will in turn appear as Trakt lists. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
+This project synchronizes your Plex library with Trakt **and/or** Simkl. Besides watched history it can optionally sync your collection, ratings, watchlists, liked/personal lists, playback progress ("continue watching") and discovery collections. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
 The recommended sync interval is **at least 60 minutes**. Shorter intervals generally do not provide any benefit, and you can even synchronize once every 24 hours to reduce the load on your server and the API.
+
+> **First login:** PlexyTrack ships with a default account **`admin` / `admin`**. On your first sign-in you are **forced to change the password** before you can use the app. Do this before exposing PlexyTrack to the internet — see [Exposing PlexyTrack to the internet](#exposing-plexytrack-to-the-internet).
 
 ## Features
 
-- Bidirectional sync of watched history between Plex and Trakt or Simkl
-- Optional synchronization of ratings, collections, liked lists and watchlists (ratings supported for both Trakt and Simkl; Simkl accepts movies and shows only)
-- Live Sync mode to trigger updates immediately from Plex webhooks
-- Simple backup and restore of all your Trakt data from the web interface
-- Intuitive UI for configuration and user selection
+- **Bidirectional watched-history sync** between Plex and Trakt or Simkl (incremental, delta-aware).
+- **Dual-provider mode** ("Both"): sync Plex to Trakt **and** Simkl in one pass.
+- **Direct Trakt ↔ Simkl bridge**: ratings, watchlist and movie history propagate between the two services (not only via Plex).
+- **Ratings, collection, liked/personal lists and watchlists** sync, each with a configurable direction (Plex → service, service → Plex, or bidirectional). Ratings work on both Trakt and Simkl.
+- **Plex Discover watchlist as a hub**: kept in sync with Trakt watchlist and Simkl plan-to-watch.
+- **Playback progress ("continue watching")** mirrored between Plex, Trakt and Simkl.
+- **Discovery collections**: Trakt recommendations/trending/popular/anticipated and Simkl trending, materialized as dynamic Plex collections.
+- **Cross-service anime matching** via Simkl's MAL/AniDB id graph.
+- **Live Sync** mode to trigger updates immediately from Plex webhooks.
+- **Backup and restore** of your history, watchlist and ratings from the web interface.
+- **Hardened for public exposure** behind a reverse proxy (own login, CSRF, rate limiting, security headers, production WSGI server).
+- Intuitive UI for configuration and user selection.
 
 ## CONTENTS
 
@@ -22,6 +31,7 @@ The recommended sync interval is **at least 60 minutes**. Shorter intervals gene
 - [Collections and watchlists](#collections-and-watchlists)
 - [Backup and restore](#backup-and-restore)
 - [Live sync](#live-sync)
+- [Exposing PlexyTrack to the internet](#exposing-plexytrack-to-the-internet)
 - [Getting a Plex token](#getting-a-plex-token)
 - [Getting Trakt API credentials](#getting-trakt-api-credentials)
 - [Running on Unraid](#running-on-unraid)

@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.5.0 (2026-07-09)
+
+### New sync connections (Plex ↔ Trakt ↔ Simkl)
+
+- **Delta sync**: uses Trakt `/sync/last_activities` and Simkl `/sync/activities` to skip service → Plex pulls whose category hasn't changed since the last run (fails open, so it never syncs less than before).
+- **Dual-provider mode ("Both")**: run the full sync against Trakt **and** Simkl in a single pass, freezing one Plex window across providers.
+- **Direct Trakt ↔ Simkl bridge**: mirror ratings, watchlist and movie history straight between the two services.
+- **Playback progress ("continue watching")**: mirror in-progress resume points between Plex, Trakt and Simkl (Trakt `/sync/playback` + scrobble, Simkl scrobble + `/sync/playback`).
+- **Plex Discover watchlist hub**: bidirectional Plex Discover watchlist ↔ Simkl plan-to-watch, alongside the existing Trakt watchlist sync.
+- **Discovery collections**: Trakt recommendations/trending/popular/anticipated and Simkl trending (public CDN) materialized as dynamic Plex collections.
+- **Cross-service anime matching** via Simkl's MAL/AniDB id graph; Trakt collection now carries technical metadata and supports shows/episodes.
+
+### Security (public exposure hardening)
+
+- **Security response headers**: Content-Security-Policy, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, and HSTS on HTTPS. The `Server` header no longer leaks the Werkzeug version.
+- **Request-size limit** (`PLEXYTRACK_MAX_UPLOAD_MB`, default 32) so oversized uploads (e.g. `/backup/restore`) are rejected with 413.
+- **Optional Host allowlist** (`PLEXYTRACK_ALLOWED_HOSTS`) to block Host-header spoofing.
+- **Production WSGI server**: the container now runs under **waitress** instead of the Werkzeug dev server (`wsgi.py`).
+- **Startup security self-check** that warns about weak exposure configuration.
+
+### Logging & housekeeping
+
+- **Improved logging**: module name in the log format and a configurable level via `PLEXYTRACK_LOG_LEVEL`.
+- Translated all remaining Spanish code comments to English.
+- Documented the default `admin/admin` login and the internet-exposure checklist in the README.
+
+### Tests
+
+- Added test suites for delta sync/Group B, dual provider, the bridge, playback, the watchlist hub, discovery collections and anime matching, plus new security tests. 224 tests passing.
+
 ## v0.4.12 (2026-07-09)
 
 ### Security

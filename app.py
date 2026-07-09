@@ -123,30 +123,41 @@ from simkl_utils import (
 # --------------------------------------------------------------------------- #
 # LOGGING
 # --------------------------------------------------------------------------- #
-# Configure root logger with a single handler to prevent duplicates
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+# Log level is configurable via PLEXYTRACK_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR);
+# defaults to INFO. The format includes the module name so it is clear whether a
+# line comes from the web app, the Trakt/Simkl clients or the Plex helpers.
+_LOG_LEVEL = getattr(
+    logging,
+    os.environ.get("PLEXYTRACK_LOG_LEVEL", "INFO").strip().upper(),
+    logging.INFO,
+)
 
-# Remove any existing handlers to prevent duplicates
+root_logger = logging.getLogger()
+root_logger.setLevel(_LOG_LEVEL)
+
+# Reset handlers so re-importing the module never duplicates log lines.
 for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
 
-# Add a single console handler
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+console_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+)
 root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 
-# Configure werkzeug (Flask's HTTP request logger) to reduce verbosity
-werkzeug_logger = logging.getLogger('werkzeug')
-werkzeug_logger.setLevel(logging.WARNING)
+# Keep Flask's HTTP request logger quiet; access logging is the proxy's job.
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # --------------------------------------------------------------------------- #
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.12"
+APP_VERSION = "v0.5.0"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -253,7 +264,7 @@ def inject_version():
 SYNC_INTERVAL_MINUTES = 60  # default frequency
 SYNC_COLLECTION = False
 SYNC_RATINGS = True
-SYNC_WATCHED = True  # ahora sí se respeta este flag
+SYNC_WATCHED = True  # honoured on every sync run
 SYNC_LIKED_LISTS = False
 SYNC_WATCHLISTS = False
 SYNC_PLAYBACK = False  # mirror in-progress resume points ("continue watching")
@@ -852,7 +863,7 @@ def get_plex_server():
                 logger.warning("Token-based authentication failed: %s", exc)
                 plex = None
 
-        # Last resort: método legacy con token
+        # Last resort: legacy token-based method
         legacy = get_plex_server_legacy()
         if legacy is not None:
             plex = legacy
@@ -1828,7 +1839,8 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
             if stop_event.is_set():
                 logger.info("Sync cancelled")
                 return
-            # Para cada episodio necesitamos el GUID de la SERIE (no el del episodio) para que Simkl pueda identificarla correctamente.
+            # Each episode needs the SHOW GUID (not the episode's) so Simkl can
+            # identify the series correctly.
             episodes_to_add_fmt = []
             for e in episodes_to_add:
                 if stop_event.is_set():
@@ -1839,7 +1851,8 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
                 code = ep_info["code"]
                 watched_at = ep_info.get("watched_at")
 
-                # Intentamos obtener la serie desde la biblioteca de Plex para extraer un GUID válido (imdb/tmdb/tvdb) a nivel de serie.
+                # Try to resolve the show from the Plex library to get a
+                # show-level GUID (imdb/tmdb/tvdb).
                 show_guid = None
                 try:
                     show_obj = get_show_from_library(sync_plex, show_title)
@@ -1848,7 +1861,7 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
                 except Exception as exc:
                     logger.debug("Failed to obtain GUID for show %s: %s", show_title, exc)
 
-                # Si seguimos sin GUID de serie, recurrimos al GUID del episodio como último recurso.
+                # Fall back to the episode GUID when no show-level GUID exists.
                 if show_guid is None:
                     show_guid = e
 
@@ -3196,25 +3209,23 @@ def plex_webhook():
 @login_required
 def users_page():
     """Display Plex users and optional play history counts."""
-    # No intentar conectar automáticamente - la página manejará la autenticación
-    # Esta página ahora usa la interfaz interactiva para autenticación
-    
-    # Si hay credenciales configuradas, intentar obtener información automáticamente
+    # Don't auto-connect here; the page drives authentication interactively.
+    # Only attempt an automatic connection when credentials are preconfigured.
     email = os.environ.get("PLEX_EMAIL")
     password = os.environ.get("PLEX_PASSWORD")
-    
+
     owner = None
     users = []
     watch_counts = None
-    
+
     if email and password:
-        # Solo si hay credenciales preconfiguradas, intentar conexión automática
+        # Only try an automatic connection when credentials are preconfigured.
         try:
             plex_server = get_plex_server()
             account = get_plex_account()
-            
+
             if plex_server and account:
-                # Obtener información del owner desde la cuenta myPlex
+                # Build the owner entry from the myPlex account.
                 owner = {
                     "id": account.id,
                     "username": account.username,
@@ -3223,7 +3234,7 @@ def users_page():
                     "is_owner": True,
                 }
 
-                # Obtener usuarios gestionados usando el nuevo esquema
+                # Enumerate managed users (home users).
                 try:
                     for user in account.users():
                         logger.debug("MyPlexUser: ID=%s, username=%s, title=%s, home=%s, friend=%s", 
@@ -3233,13 +3244,13 @@ def users_page():
                                     getattr(user, 'home', 'N/A'),
                                     getattr(user, 'friend', 'N/A'))
                         
-                        # Determinar el rol del usuario correctamente
+                        # Determine the user's role.
                         if hasattr(user, 'home') and user.home:
                             role = "managed user"
-                            selectable = True  # Los managed users son seleccionables
+                            selectable = True  # managed users are selectable
                         elif hasattr(user, 'friend') and user.friend:
                             role = "friend"
-                            selectable = False  # Los friends no son seleccionables para historial
+                            selectable = False  # friends can't be selected for history
                         else:
                             role = "user"
                             selectable = False
@@ -3267,14 +3278,14 @@ def users_page():
                     
                     if uid is not None:
                         try:
-                            # Usar el nuevo esquema para obtener el historial
+                            # Fetch the play history for the selected user.
                             if uid == account.id:
                                 logger.info("Fetching viewing data for owner (account ID: %s)", uid)
-                                # Para el owner, obtener historial global
+                                # Owner: fetch the global history.
                                 watch_counts = get_owner_watch_counts(account)
                             else:
                                 logger.info("Fetching viewing data for managed user ID: %s", uid)
-                                # Para usuarios gestionados, usar account.user()
+                                # Managed user: use account.user().
                                 watch_counts = get_managed_user_watch_counts(account, uid)
                             
                             logger.info("Successfully fetched watch counts for user %s: %d movies, %d episodes", 
@@ -3759,19 +3770,17 @@ def test_connections() -> bool:
 
 
 def start_scheduler():
-    """Arranca o reinicia el scheduler garantizando **un único** job activo.
+    """Start or restart the scheduler, guaranteeing a single active job.
 
-    1. Si el scheduler no está corriendo se hace un *start* tras validar
-       conexiones.
-    2. Antes de añadir el nuevo trabajo se eliminan TODOS los jobs existentes
-       para evitar duplicados.
+    1. If the scheduler isn't running, start it after the connection test.
+    2. Remove every existing job before adding the new one to avoid duplicates.
     """
     global scheduler
     stop_event.clear()
     # Recreate scheduler if it was shut down previously
     if scheduler.state == STATE_STOPPED:
         scheduler = BackgroundScheduler()
-    # Iniciamos el scheduler si no está corriendo todavía
+    # Start the scheduler if it isn't running yet.
     if not scheduler.running:
         if not test_connections():
             logger.error("Connection test failed. Scheduler will not start.")
@@ -3779,12 +3788,12 @@ def start_scheduler():
         scheduler.start()
         logger.info("Scheduler started")
 
-    # Eliminamos cualquier job existente para garantizar que sólo haya uno
+    # Remove any existing job so exactly one remains.
     for job in scheduler.get_jobs():
         scheduler.remove_job(job.id)
     logger.info("Removed existing scheduled job(s)")
 
-    # Añadimos el nuevo trabajo periódico
+    # Add the new periodic job.
     only_watchlist = SYNC_WATCHLISTS and not any(
         [SYNC_COLLECTION, SYNC_RATINGS, SYNC_WATCHED, SYNC_LIKED_LISTS]
     )
@@ -3804,13 +3813,13 @@ def start_scheduler():
 
 
 def stop_scheduler():
-    """Detiene y elimina el job de sincronización dejando el scheduler limpio."""
+    """Stop and remove the sync job, leaving the scheduler clean."""
     global scheduler
     stop_event.set()
     for job in scheduler.get_jobs():
         scheduler.remove_job(job.id)
     if scheduler.running and not scheduler.get_jobs():
-        # Si no quedan trabajos activos podemos apagar el scheduler
+        # Shut the scheduler down when no active jobs remain.
         scheduler.shutdown(wait=False)
         scheduler = BackgroundScheduler()
     logger.info("Synchronization job(s) stopped")

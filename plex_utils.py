@@ -353,7 +353,7 @@ def get_owner_plex_history(account, mindate: Optional[str] = None) -> Tuple[
                                 guid = get_cached_movie_guid(title, year, movie)
                                 if not guid or guid in movies:
                                     continue
-                                # Buscar si hay historial para este ítem (solo para el owner)
+                                # Look up history for this item (owner only).
                                 user_history_for_movie = list(
                                     plex_server.history(
                                         ratingKey=movie.ratingKey,

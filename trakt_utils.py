@@ -33,7 +33,7 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.4.12"
+APP_VERSION = "v0.5.0"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
 STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
