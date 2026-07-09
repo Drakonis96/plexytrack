@@ -141,6 +141,38 @@ the application will trigger an immediate sync whenever an event is received.
 When the Simkl provider is selected, the received payload is also forwarded to
 Simkl's own `sync/plex/webhook` endpoint for instant updates.
 
+## Exposing PlexyTrack to the internet
+
+PlexyTrack has its own login and is hardened for exposure behind a reverse
+proxy (Nginx/Traefik/Caddy). The app emits security headers (CSP,
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`,
+`Permissions-Policy`, and HSTS on HTTPS), rate-limits logins (5 attempts / 5
+min per IP), protects state-changing requests with CSRF tokens, hashes
+passwords with PBKDF2, forces a password change away from the default
+`admin/admin`, and caps request bodies to guard against oversized uploads.
+
+Before you expose it publicly, do the following:
+
+1. **Change the default password.** On first login the app forces this; do not
+   skip it.
+2. **Serve over HTTPS at the proxy** and set `PLEXYTRACK_SECURE_COOKIES=true` so
+   session/CSRF cookies get the `Secure` flag.
+3. **Set `FLASK_SECRET_KEY`** to a long random string (e.g.
+   `python -c "import secrets; print(secrets.token_hex(32))"`). Without it a new
+   key is generated on every restart, logging everyone out.
+4. **Set `PLEXYTRACK_TRUSTED_PROXY_COUNT`** to the number of proxies in front of
+   the app (usually `1`) so login rate limiting sees the real client IP.
+5. **Set `PLEXYTRACK_ALLOWED_HOSTS`** to your domain(s) to reject Host-header
+   spoofing, e.g. `PLEXYTRACK_ALLOWED_HOSTS=plexytrack.example.com`.
+6. **Only let the proxy reach the container.** Don't publish port 5030 directly
+   to the internet — bind it to the proxy's internal network so the app is never
+   reachable except through the proxy.
+7. **Set `PLEXYTRACK_WEBHOOK_TOKEN`** if you use Live Sync, so only your Plex
+   server can trigger syncs (`/webhook?token=YOUR_SECRET`).
+
+On startup the app logs a **security self-check** that flags any of the above
+that still needs attention.
+
 ## Getting a Plex token
 
 1. Open the Plex Web application and sign in.

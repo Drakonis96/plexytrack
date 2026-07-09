@@ -199,6 +199,27 @@ WEBHOOK_TOKEN = os.environ.get("PLEXYTRACK_WEBHOOK_TOKEN", "").strip()
 MIN_PASSWORD_LENGTH = _env_int("PLEXYTRACK_MIN_PASSWORD_LENGTH", 8)
 MAX_PASSWORD_LENGTH = 1024
 
+# Maximum accepted request-body size (MB). Protects endpoints such as
+# /backup/restore (which parses an uploaded JSON file) from memory-exhaustion
+# via oversized uploads; Flask returns 413 for anything larger.
+MAX_CONTENT_LENGTH_MB = _env_int("PLEXYTRACK_MAX_UPLOAD_MB", 32)
+
+# Optional comma-separated allowlist of Host header values the app answers to.
+# When set, requests with any other Host are rejected — a defence against
+# Host-header injection if the container is ever reachable outside the proxy.
+# Unset = accept any Host (backward compatible).
+ALLOWED_HOSTS = tuple(
+    h.strip().lower()
+    for h in os.environ.get("PLEXYTRACK_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+)
+
+# HSTS is emitted only on responses that are actually served over HTTPS
+# (request.is_secure respects X-Forwarded-Proto behind the proxy), so it is safe
+# to leave enabled even for plain-HTTP LAN access.
+HSTS_ENABLED = _env_flag("PLEXYTRACK_HSTS", True)
+HSTS_MAX_AGE = _env_int("PLEXYTRACK_HSTS_MAX_AGE", 31536000)  # 1 year
+
 # CSRF protection settings
 CSRF_COOKIE_NAME = "plexytrack_csrf"
 CSRF_HEADER_NAMES = ("X-CSRFToken", "X-CSRF-Token")
@@ -221,6 +242,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=SECURE_COOKIES,
     PERMANENT_SESSION_LIFETIME=86400,  # 24 hours
+    MAX_CONTENT_LENGTH=MAX_CONTENT_LENGTH_MB * 1024 * 1024,
 )
 
 
@@ -468,7 +490,17 @@ _PW_CHANGE_ALLOWED_ENDPOINTS = {
 
 @app.before_request
 def _security_before_request():
-    """Enforce CSRF on mutating requests and forced password changes."""
+    """Reject bad Host headers, enforce CSRF and forced password changes."""
+    # ---- Host allowlist (opt-in) --------------------------------------------
+    if ALLOWED_HOSTS:
+        host = (request.host or "").rsplit(":", 1)[0].lower()
+        if host not in ALLOWED_HOSTS:
+            logger.warning(
+                "Rejected request with disallowed Host %r from %s",
+                request.host, _client_ip(),
+            )
+            return ("Bad Request", 400)
+
     endpoint = request.endpoint or ""
     authenticated = bool(session.get("authenticated"))
 
@@ -529,6 +561,50 @@ def _publish_csrf_cookie(response):
                 httponly=False,
             )
     return response
+
+
+@app.after_request
+def _security_headers(response):
+    """Attach hardening headers suitable for public (reverse-proxied) exposure."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
+    )
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    # Content-Security-Policy: the UI ships inline <script>/<style> and pulls
+    # Google Fonts, so those are allowed explicitly. frame-ancestors 'none'
+    # blocks clickjacking, object-src 'none' blocks plugin injection, and
+    # base-uri/form-action 'self' block base-tag and form-hijacking tricks.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "object-src 'none'"
+    )
+    # Only advertise HSTS when the response is actually over HTTPS.
+    if HSTS_ENABLED and request.is_secure:
+        response.headers["Strict-Transport-Security"] = (
+            f"max-age={HSTS_MAX_AGE}; includeSubDomains"
+        )
+    # Reduce framework/version disclosure.
+    response.headers["Server"] = "PlexyTrack"
+    return response
+
+
+@app.errorhandler(413)
+def _too_large(_exc):
+    """Clean 413 instead of a stack page when a body exceeds MAX_CONTENT_LENGTH."""
+    if _wants_json_response():
+        return jsonify({"success": False, "error": "Request too large"}), 413
+    return ("Request too large", 413)
 
 
 @app.context_processor
@@ -4144,7 +4220,58 @@ def clear_session_credentials():
 # --------------------------------------------------------------------------- #
 # MAIN
 # --------------------------------------------------------------------------- #
-if __name__ == "__main__":
+def _log_exposure_warnings() -> None:
+    """Warn about weak configuration before the app is exposed publicly."""
+    warnings = []
+    if not os.environ.get("FLASK_SECRET_KEY"):
+        warnings.append(
+            "FLASK_SECRET_KEY is not set: a random key is generated per start, so "
+            "every restart logs all users out and multiple workers can't share "
+            "sessions. Set a persistent 64-char hex secret."
+        )
+    if not SECURE_COOKIES:
+        warnings.append(
+            "PLEXYTRACK_SECURE_COOKIES is off: enable it when serving over HTTPS "
+            "so session/CSRF cookies get the Secure flag."
+        )
+    if TRUSTED_PROXY_COUNT == 0:
+        warnings.append(
+            "PLEXYTRACK_TRUSTED_PROXY_COUNT is 0: behind a reverse proxy set it to "
+            "the number of proxies so login rate-limiting sees the real client IP."
+        )
+    if not ALLOWED_HOSTS:
+        warnings.append(
+            "PLEXYTRACK_ALLOWED_HOSTS is unset: set it to your domain to reject "
+            "Host-header spoofing. Also ensure only the proxy can reach the app."
+        )
+    if not WEBHOOK_TOKEN:
+        warnings.append(
+            "PLEXYTRACK_WEBHOOK_TOKEN is unset: the /webhook endpoint is open. Set "
+            "a token so only your Plex server can trigger live syncs."
+        )
+    creds = load_credentials()
+    if creds.get("is_default"):
+        warnings.append(
+            "Default admin/admin credentials are still active: sign in and change "
+            "the password before exposing the app."
+        )
+    if warnings:
+        logger.warning("──── SECURITY: review before public exposure ────")
+        for w in warnings:
+            logger.warning("  • %s", w)
+        logger.warning("─────────────────────────────────────────────────")
+    else:
+        logger.info("Security self-check passed for public exposure.")
+
+
+def startup_init() -> None:
+    """Run one-time startup initialization.
+
+    Shared by the ``python app.py`` dev entrypoint and the production WSGI
+    entrypoint (``wsgi.py`` served by waitress) so both perform the same
+    volume/credential/token setup and security self-check.
+    """
+    global SAFE_MODE
     logger.info("Starting PlexyTrackt application")
     ensure_directory(CONFIG_DIR)
     ensure_directory(STATE_DIR)
@@ -4158,12 +4285,16 @@ if __name__ == "__main__":
     load_plex_token()
     load_provider()
     load_settings()
+    _log_exposure_warnings()
     if state_data.get("lastSync") is None and not SYNC_WATCHED:
         SAFE_MODE = True
         logger.warning(
             "No last sync timestamp and history sync disabled; entering SAFE-MODE"
         )
-    # Removed automatic scheduler start - only manual start from sync tab
-    # start_scheduler()
-    # Disable Flask's auto-reloader to avoid duplicate logs
+
+
+if __name__ == "__main__":
+    startup_init()
+    # Development entrypoint (Werkzeug). Production deployments should use the
+    # waitress WSGI server via wsgi.py (see the Dockerfile).
     app.run(host="0.0.0.0", port=5030, use_reloader=False)

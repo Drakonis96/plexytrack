@@ -293,3 +293,82 @@ def test_webhook_accepts_valid_token(env, client, monkeypatch):
     monkeypatch.setattr(app_module, "WEBHOOK_TOKEN", "s3cret")
     r = client.post("/webhook?token=s3cret", data="{}", content_type="application/json")
     assert r.status_code == 204
+
+
+# --------------------------------------------------------------------------- #
+# 9. Security response headers (public exposure)
+# --------------------------------------------------------------------------- #
+def test_security_headers_present(env, client):
+    r = client.get("/login")
+    assert r.headers["X-Frame-Options"] == "DENY"
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"]
+    assert "object-src 'none'" in r.headers["Content-Security-Policy"]
+    assert r.headers["Permissions-Policy"].startswith("geolocation=()")
+    # Framework/version disclosure reduced.
+    assert "Werkzeug" not in r.headers.get("Server", "")
+
+
+def test_hsts_only_on_https(env, client):
+    # Plain HTTP: no HSTS.
+    assert client.get("/login").headers.get("Strict-Transport-Security") is None
+    # HTTPS (via X-Forwarded-Proto, honoured by ProxyFix): HSTS present.
+    r = client.get("/login", headers={"X-Forwarded-Proto": "https"})
+    assert "max-age=" in r.headers.get("Strict-Transport-Security", "")
+
+
+# --------------------------------------------------------------------------- #
+# 10. Host allowlist + request size limit
+# --------------------------------------------------------------------------- #
+def test_host_allowlist_rejects_unknown_host(env, client, monkeypatch):
+    monkeypatch.setattr(app_module, "ALLOWED_HOSTS", ("plexytrack.example.com",))
+    assert client.get("/login", headers={"Host": "plexytrack.example.com"}).status_code == 200
+    assert client.get("/login", headers={"Host": "evil.com"}).status_code == 400
+
+
+def test_host_allowlist_disabled_by_default(env, client, monkeypatch):
+    monkeypatch.setattr(app_module, "ALLOWED_HOSTS", ())
+    assert client.get("/login", headers={"Host": "anything.test"}).status_code == 200
+
+
+def test_oversized_body_rejected(env, client, monkeypatch):
+    monkeypatch.setitem(app_module.app.config, "MAX_CONTENT_LENGTH", 1024)
+    big = {"username": "a", "password": "x" * 4000}
+    assert client.post("/login", data=big).status_code == 413
+
+
+def test_max_content_length_configured():
+    assert app_module.app.config.get("MAX_CONTENT_LENGTH") == app_module.MAX_CONTENT_LENGTH_MB * 1024 * 1024
+
+
+# --------------------------------------------------------------------------- #
+# 11. Startup exposure self-check
+# --------------------------------------------------------------------------- #
+def test_exposure_warnings_flag_weak_config(env, monkeypatch, caplog):
+    import logging
+    monkeypatch.delenv("FLASK_SECRET_KEY", raising=False)
+    monkeypatch.setattr(app_module, "SECURE_COOKIES", False)
+    monkeypatch.setattr(app_module, "TRUSTED_PROXY_COUNT", 0)
+    monkeypatch.setattr(app_module, "ALLOWED_HOSTS", ())
+    monkeypatch.setattr(app_module, "WEBHOOK_TOKEN", "")
+    monkeypatch.setattr(app_module, "load_credentials", lambda: {"is_default": True})
+    with caplog.at_level(logging.WARNING):
+        app_module._log_exposure_warnings()
+    text = caplog.text
+    assert "FLASK_SECRET_KEY" in text
+    assert "SECURE_COOKIES" in text
+    assert "default admin/admin" in text.lower()
+
+
+def test_exposure_selfcheck_passes_when_hardened(env, monkeypatch, caplog):
+    import logging
+    monkeypatch.setenv("FLASK_SECRET_KEY", "x" * 64)
+    monkeypatch.setattr(app_module, "SECURE_COOKIES", True)
+    monkeypatch.setattr(app_module, "TRUSTED_PROXY_COUNT", 1)
+    monkeypatch.setattr(app_module, "ALLOWED_HOSTS", ("plexytrack.example.com",))
+    monkeypatch.setattr(app_module, "WEBHOOK_TOKEN", "s3cret")
+    monkeypatch.setattr(app_module, "load_credentials", lambda: {"is_default": False})
+    with caplog.at_level(logging.INFO):
+        app_module._log_exposure_warnings()
+    assert "Security self-check passed" in caplog.text

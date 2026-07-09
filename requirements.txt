@@ -2,4 +2,5 @@ Flask
 requests
 APScheduler
 plexapi>=4.15,<5
+waitress
 
