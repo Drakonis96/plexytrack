@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.3 (2026-07-09)
+
+### Login page
+
+- **Fix invisible logo**: the app logo (`logo.png`) is a white glyph on a transparent background, so it disappeared against the white login card. The `.login-logo` badge now paints the brand accent colour behind it, so the logo renders as a proper blue badge in both light and dark themes.
+
 ## v0.5.2 (2026-07-09)
 
 ### Logs page

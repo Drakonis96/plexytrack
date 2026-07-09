@@ -1192,10 +1192,14 @@ select.direction-select {
 }
 
 .login-logo {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-md);
   margin: 0 auto 16px;
+  padding: 12px;
+  background: var(--accent);
+  object-fit: contain;
+  box-sizing: border-box;
 }
 
 .login-header h1 {
