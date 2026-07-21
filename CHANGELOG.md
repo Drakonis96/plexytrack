@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.4 (2026-07-21)
+
+### Watchlist sync
+
+- **Simkl watchlist-only sync** (#246): the standalone watchlist-only run (the "sync watchlist" job, `trigger=once, mode=watchlist`) no longer bails out with *"Watchlist sync is only supported with Trakt provider."* when Simkl is the selected tracker. The Plex Discover ↔ Simkl plan-to-watch bidirectional sync (already used inside the full sync) is now reachable from the watchlist-only path as well. In **Both** mode the standalone run drives Trakt and Simkl in the same pass. The full-sync Trakt path is unchanged.
+
 ## v0.5.3 (2026-07-09)
 
 ### Login page
