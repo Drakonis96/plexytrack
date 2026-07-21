@@ -225,7 +225,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.5.3"
+APP_VERSION = "v0.5.4"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -1356,65 +1356,124 @@ def sync_watchlists_only(
     plex_history=None,
     trakt_history=None,
 ):
-    """Synchronize Plex and Trakt watchlists without history sync."""
+    """Synchronize watchlists without history sync.
+
+    Supports every configured provider: Trakt (Plex ``<->`` Trakt watchlist),
+    Simkl (Plex Discover ``<->`` Simkl plan-to-watch) and the dual ``both``
+    mode. When the caller supplies an initialized ``plex``/``headers`` pair
+    (the full sync reuses this for its Trakt pass) only the Trakt path runs;
+    Simkl is driven separately inside the full sync. When run standalone (the
+    watchlist-only job) the clients are initialized here for whichever
+    provider(s) the current ``SYNC_PROVIDER`` selects.
+    """
     logger.debug("Starting watchlist-only sync...")
-    
+
     if stop_event.is_set():
         logger.info("Sync cancelled")
         return
 
     plex_history = plex_history or set()
     trakt_history = trakt_history or set()
-    
+
     logger.debug("Plex history size: %d, Trakt history size: %d", len(plex_history), len(trakt_history))
 
-    # Allow standalone execution without pre-initialized clients
-    if plex is None or headers is None:
-        logger.debug("Initializing clients for standalone watchlist sync...")
-        if SYNC_PROVIDER not in ("trakt", "both"):
-            logger.warning("Watchlist sync is only supported with Trakt provider.")
+    def _run_trakt_watchlist(plex_srv, trakt_headers):
+        logger.debug("Calling sync_watchlist (Trakt) function...")
+        try:
+            sync_watchlist(
+                plex_srv,
+                trakt_headers,
+                plex_history,
+                trakt_history,
+                direction=WATCHLISTS_SYNC_DIRECTION,
+            )
+            logger.debug("Trakt watchlist sync completed successfully")
+        except TraktAccountLimitError as exc:
+            logger.error("Watchlist sync skipped: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Watchlist sync failed: %s", exc)
+            import traceback
+            logger.debug("Watchlist sync traceback: %s", traceback.format_exc())
+        else:
+            mirror_trakt_watchlist_to_simkl(trakt_headers)
+
+    def _run_simkl_watchlist(plex_srv, simkl_headers):
+        logger.debug("Calling sync_watchlist_plex_simkl function...")
+        try:
+            sync_watchlist_plex_simkl(
+                plex_srv,
+                simkl_headers,
+                direction=WATCHLISTS_SYNC_DIRECTION,
+            )
+            logger.debug("Simkl watchlist sync completed successfully")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Simkl watchlist sync failed: %s", exc)
+            import traceback
+            logger.debug("Simkl watchlist sync traceback: %s", traceback.format_exc())
+
+    # Caller supplied initialized Trakt clients (reused inside the full sync):
+    # run only the Trakt path — the full sync drives Simkl separately.
+    if plex is not None and headers is not None:
+        _run_trakt_watchlist(plex, headers)
+        return
+
+    # Standalone watchlist-only run: initialize clients for the configured
+    # provider(s) and sync each one.
+    logger.debug("Initializing clients for standalone watchlist sync...")
+    if SYNC_PROVIDER not in ("trakt", "simkl", "both"):
+        logger.warning("Watchlist sync requires the Trakt or Simkl provider.")
+        return
+
+    load_trakt_tokens()
+    load_simkl_tokens()
+
+    reset_cache()
+    if not test_connections():
+        logger.error("Watchlist sync cancelled due to connection errors.")
+        return
+
+    logger.debug("Getting Plex server...")
+    plex = get_plex_server()
+    if plex is None:
+        logger.error("No Plex server available for watchlist sync")
+        return
+
+    run_trakt = SYNC_PROVIDER in ("trakt", "both")
+    run_simkl = SYNC_PROVIDER in ("simkl", "both")
+
+    if run_trakt:
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
             return
-        reset_cache()
-        if not test_connections():
-            logger.error("Watchlist sync cancelled due to connection errors.")
-            return
-        if plex is None:
-            logger.debug("Getting Plex server...")
-            plex = get_plex_server()
-            if plex is None:
-                logger.error("No Plex server available for watchlist sync")
-                return
-        if headers is None:
-            logger.debug("Setting up Trakt headers...")
-            if not refresh_trakt_token():
-                logger.error("Failed to refresh Trakt token. Aborting watchlist sync.")
-                return
+        logger.debug("Setting up Trakt headers...")
+        if not refresh_trakt_token():
+            logger.error("Failed to refresh Trakt token. Skipping Trakt watchlist sync.")
+        else:
             load_trakt_tokens()
-            headers = {
+            trakt_headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {os.environ.get('TRAKT_ACCESS_TOKEN')}",
                 "trakt-api-version": "2",
                 "trakt-api-key": os.environ["TRAKT_CLIENT_ID"],
             }
+            _run_trakt_watchlist(plex, trakt_headers)
 
-    logger.debug("Calling sync_watchlist function...")
-    try:
-        sync_watchlist(
-            plex,
-            headers,
-            plex_history,
-            trakt_history,
-            direction=WATCHLISTS_SYNC_DIRECTION,
-        )
-        logger.debug("Watchlist sync completed successfully")
-    except TraktAccountLimitError as exc:
-        logger.error("Watchlist sync skipped: %s", exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Watchlist sync failed: %s", exc)
-        import traceback
-        logger.debug("Watchlist sync traceback: %s", traceback.format_exc())
-    else:
-        mirror_trakt_watchlist_to_simkl(headers)
+    if run_simkl:
+        if stop_event.is_set():
+            logger.info("Sync cancelled")
+            return
+        logger.debug("Setting up Simkl headers...")
+        simkl_token = os.environ.get("SIMKL_ACCESS_TOKEN")
+        simkl_client_id = os.environ.get("SIMKL_CLIENT_ID")
+        if not (simkl_token and simkl_client_id):
+            logger.error("Simkl is not configured. Skipping Simkl watchlist sync.")
+        else:
+            simkl_headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {simkl_token}",
+                "simkl-api-key": simkl_client_id,
+            }
+            _run_simkl_watchlist(plex, simkl_headers)
 
 
 def mirror_trakt_watchlist_to_simkl(headers) -> None:
