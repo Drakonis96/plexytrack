@@ -28,6 +28,7 @@ from utils import (
     ids_to_guid,
     match_guids_to_plex,
     sync_items_to_collection,
+    is_confident_title_match,
 )
 
 logger = logging.getLogger(__name__)
@@ -1932,7 +1933,12 @@ def trakt_search_ids(
     is_movie: bool = True,
     year: Optional[int] = None,
 ) -> Dict[str, Union[str, int]]:
-    """Search for a movie/show on Trakt and return its IDs."""
+    """Search for a movie/show on Trakt and return its IDs.
+
+    Only reached when a direct GUID lookup already failed. Each candidate is
+    checked with is_confident_title_match() before being accepted; the first
+    result is not automatically the right one.
+    """
     media_type = "movie" if is_movie else "show"
     query_params = {"query": title, "type": media_type}
     if year:
@@ -1943,10 +1949,24 @@ def trakt_search_ids(
 
     for result in data:
         item = result.get(media_type)
-        if item:
-            ids = item.get("ids", {})
-            if ids:
-                return ids
+        if not item:
+            continue
+        ids = item.get("ids", {})
+        if not ids:
+            continue
+        if not is_confident_title_match(
+            title,
+            item.get("title"),
+            query_year=year,
+            candidate_year=item.get("year"),
+        ):
+            continue
+        return ids
+    logger.warning(
+        "Trakt search for '%s'%s returned no confident match - skipping",
+        title,
+        f" ({year})" if year else "",
+    )
     return {}
 
 

@@ -1,10 +1,65 @@
+import difflib
 import logging
+import re
+import unicodedata
 from datetime import datetime, timezone
 from numbers import Number
 from typing import Dict, Optional, Tuple, Union
 from plexapi.exceptions import NotFound
 
 logger = logging.getLogger(__name__)
+
+# \W is unicode-aware, so CJK/Cyrillic/etc. titles survive normalization
+# instead of collapsing to an empty string (which would make every
+# non-Latin title an automatic non-match).
+_TITLE_NORMALIZE_RE = re.compile(r"[\W_]+")
+
+
+def _normalize_title(title: Optional[str]) -> str:
+    """Casefold, strip accents, and collapse punctuation/whitespace for loose
+    title comparison ("Amélie" == "Amelie", "WALL·E" == "WALL-E")."""
+    decomposed = unicodedata.normalize("NFKD", title or "")
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return _TITLE_NORMALIZE_RE.sub(" ", stripped.casefold()).strip()
+
+
+def is_confident_title_match(
+    query_title: Optional[str],
+    candidate_title: Optional[str],
+    *,
+    query_year: Optional[int] = None,
+    candidate_year: Optional[int] = None,
+    min_ratio: float = 0.72,
+) -> bool:
+    """Check that a title-search result is plausibly the item we asked for.
+
+    Compares normalized titles and, when both years are known, allows them
+    to differ by one (regional release dates drift). For short or generic
+    titles the #1 search result can be a same-named but unrelated
+    production, so callers should run every candidate through this instead
+    of trusting whatever comes back first.
+
+    Threshold notes: real variants score high ("The Office" / "The Office
+    (US)" = 0.87, "Gentlemen" / "The Gentlemen" = 0.82, "Se7en" / "Seven" =
+    0.80) and wrong items score low ("Batman" / "Batman Begins" = 0.63,
+    "Harlan Coben's Lazarus" / "Lazarus" = 0.48), so 0.72 splits them.
+    "The Batman" / "Batman" (0.75) sneaks past on title alone; the year
+    check catches it.
+    """
+    q = _normalize_title(query_title)
+    c = _normalize_title(candidate_title)
+    if not q or not c:
+        return False
+    ratio = difflib.SequenceMatcher(None, q, c).ratio()
+    if ratio < min_ratio:
+        return False
+    if query_year and candidate_year:
+        try:
+            if abs(int(query_year) - int(candidate_year)) > 1:
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
 
 
 def to_iso_z(value) -> Optional[str]:
