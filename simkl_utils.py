@@ -18,6 +18,7 @@ from utils import (
     ids_to_guid,
     match_guids_to_plex,
     sync_items_to_collection,
+    is_confident_title_match,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,8 +142,15 @@ def simkl_request(method: str, endpoint: str, headers: dict, *, retries: int = 2
 
 
 def simkl_search_ids(headers: dict, title: str, *, is_movie: bool = True, year: Optional[int] = None) -> Dict[str, Union[str, int]]:
+    """Search Simkl by title and return ids for the first confident match.
+
+    Only reached when a direct GUID lookup already failed, so title (plus
+    year, for movies) is all we have. Fetch a few candidates and take the
+    first that passes is_confident_title_match(); return {} (caller skips
+    the item) if none do, rather than trusting whatever Simkl ranked first.
+    """
     endpoint = "/search/movies" if is_movie else "/search/shows"
-    params = {"q": title, "limit": 1}
+    params = {"q": title, "limit": 5}
     if year and is_movie:
         params["year"] = year
     try:
@@ -153,13 +161,28 @@ def simkl_search_ids(headers: dict, title: str, *, is_movie: bool = True, year: 
         return {}
     if not isinstance(data, list) or not data:
         return {}
-    ids = data[0].get("ids", {}) or {}
-    for k, v in list(ids.items()):
-        try:
-            ids[k] = int(v) if str(v).isdigit() else v
-        except Exception:
-            pass
-    return ids
+    for candidate in data:
+        if not is_confident_title_match(
+            title,
+            candidate.get("title"),
+            query_year=year,
+            candidate_year=candidate.get("year"),
+        ):
+            continue
+        ids = candidate.get("ids", {}) or {}
+        for k, v in list(ids.items()):
+            try:
+                ids[k] = int(v) if str(v).isdigit() else v
+            except Exception:
+                pass
+        return ids
+    logger.warning(
+        "Simkl search for '%s'%s returned no confident match among %d candidate(s) - skipping",
+        title,
+        f" ({year})" if year else "",
+        len(data),
+    )
+    return {}
 
 
 def add_items_to_simkl_list(
