@@ -119,6 +119,7 @@ from simkl_utils import (
     sync_plex_playback_to_simkl,
     sync_playback_simkl_to_plex,
     sync_watchlist_plex_simkl,
+    sync_plex_collection_to_simkl,
     sync_simkl_trending_to_plex,
 )
 
@@ -225,7 +226,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 # APPLICATION INFO
 # --------------------------------------------------------------------------- #
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.5.4"
+APP_VERSION = "v0.5.5"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 
 # --------------------------------------------------------------------------- #
@@ -2242,7 +2243,10 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
             logger.info("Sync cancelled")
             return
         try:
-            sync_collection(sync_plex, headers)
+            if active_provider == "trakt":
+                sync_collection(sync_plex, headers)
+            elif active_provider == "simkl":
+                sync_plex_collection_to_simkl(sync_plex, headers)
         except Exception as exc:
             logger.error("Collection sync failed: %s", exc)
 
@@ -2264,7 +2268,9 @@ def _sync_inner(provider=None, shared_last_sync=None, defer_save=False):
                 except Exception as exc:
                     logger.error("Collection import (Trakt -> Plex) failed: %s", exc)
         elif active_provider == "simkl":
-            logger.warning("Collection import from Simkl is not supported.")
+            logger.warning(
+                "Simkl does not expose collection or custom-list imports through its public API."
+            )
 
     if SYNC_LIKED_LISTS and active_provider == "trakt":
         if stop_event.is_set():
@@ -2867,9 +2873,9 @@ def index():
             )
 
         if SYNC_PROVIDER == "simkl":
-            # Watchlist is supported for Simkl; only collection/liked-lists are
-            # Trakt-only.
-            SYNC_COLLECTION = False
+            # Simkl collection sync is one-way because its public API only
+            # exposes the five watchlist statuses, not ownership collections.
+            COLLECTION_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
             SYNC_LIKED_LISTS = False
 
         # Persist final settings to disk after applying restrictions
@@ -2910,9 +2916,8 @@ def index():
     display_live_sync = LIVE_SYNC
 
     if SYNC_PROVIDER == "simkl":
-        # Collection and liked-lists remain Trakt-only; watchlist is supported
-        # for Simkl (Plex Discover <-> plan-to-watch).
-        display_collection = False
+        # Liked/custom lists remain Trakt-only. Collection adds missing Plex
+        # library titles to Simkl Plan to Watch without changing existing ones.
         display_liked_lists = False
 
     if selected_user and not selected_user.get("is_owner", False):
@@ -2988,9 +2993,7 @@ def sync_once():
         )
 
     if SYNC_PROVIDER == "simkl":
-        # Watchlist is supported for Simkl; only collection/liked-lists are
-        # Trakt-only.
-        SYNC_COLLECTION = False
+        COLLECTION_SYNC_DIRECTION = DIRECTION_PLEX_TO_SERVICE
         SYNC_LIKED_LISTS = False
 
     save_settings()

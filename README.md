@@ -4,7 +4,7 @@
   <img src="static/logo2.png" alt="PlexyTrack Logo" width="200" />
 </p>
 
-This project synchronizes your Plex library with Trakt **and/or** Simkl. Besides watched history it can optionally sync your collection, ratings, watchlists, liked/personal lists, playback progress ("continue watching") and discovery collections. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
+This project synchronizes your Plex library with Trakt **and/or** Simkl. Besides watched history it can optionally sync library membership, ratings, watchlists, supported lists, playback progress ("continue watching") and discovery collections. A small Flask web interface lets you choose which features to enable and configure the sync interval. Items that are manually marked as watched in Plex are detected as well. The interface also includes a tool for creating backups of your history, watchlist and ratings.
 The recommended sync interval is **at least 60 minutes**. Shorter intervals generally do not provide any benefit, and you can even synchronize once every 24 hours to reduce the load on your server and the API.
 
 > **First login:** PlexyTrack ships with a default account **`admin` / `admin`**. On your first sign-in you are **forced to change the password** before you can use the app. Do this before exposing PlexyTrack to the internet — see [Exposing PlexyTrack to the internet](#exposing-plexytrack-to-the-internet).
@@ -14,7 +14,9 @@ The recommended sync interval is **at least 60 minutes**. Shorter intervals gene
 - **Bidirectional watched-history sync** between Plex and Trakt or Simkl (incremental, delta-aware).
 - **Dual-provider mode** ("Both"): sync Plex to Trakt **and** Simkl in one pass.
 - **Direct Trakt ↔ Simkl bridge**: ratings, watchlist and movie history propagate between the two services (not only via Plex).
-- **Ratings, collection, liked/personal lists and watchlists** sync, each with a configurable direction (Plex → service, service → Plex, or bidirectional). Ratings work on both Trakt and Simkl.
+- **Collection sync**: mirror Plex library membership with the Trakt collection, or add missing Plex library titles to Simkl Plan to Watch without changing existing Simkl statuses.
+- **Trakt liked/personal lists ↔ Plex collections**: named lists are mirrored in both directions. Simkl Custom Lists are not yet exposed by its public API.
+- **Ratings and watchlists** sync with configurable directions. Both work with Trakt and Simkl.
 - **Plex Discover watchlist as a hub**: kept in sync with Trakt watchlist and Simkl plan-to-watch.
 - **Playback progress ("continue watching")** mirrored between Plex, Trakt and Simkl.
 - **Discovery collections**: Trakt recommendations/trending/popular/anticipated and Simkl trending, materialized as dynamic Plex collections.
@@ -137,8 +139,9 @@ Once configured, PlexyTrack will keep your libraries in sync on the schedule you
 
 ### Collections and watchlists
 
-If you mark a list as liked on Trakt, PlexyTrack will create a Plex collection with the same name and add the matching movies or shows found in your library. Likewise, any collection created in Plex will be mirrored as a list on Trakt. Watchlists are also kept in sync both ways, so adding or removing an item in one platform is reflected in the other.
-When the Simkl provider is selected, your Plex library is copied to the **My TV Shows** and **My Movies** sections on Simkl and Plex collections are mirrored as Simkl lists.
+With Trakt, the **Collection** option mirrors Plex library membership to the Trakt collection and can import the Trakt collection back into Plex. The separate **Liked Lists** option creates Plex collections for liked or personal Trakt lists and mirrors named Plex collections to Trakt lists. Watchlists can also be synchronized in either direction.
+
+With Simkl, **Collection** is a one-way Plex → Simkl library import. Movies and shows that are missing from Simkl are added to **Plan to Watch**; titles already present as watching, completed, on hold, dropped, or already planned are left unchanged. Simkl's public API does not currently allow apps to create or edit named [Custom Lists](https://api.simkl.org/guides/custom-lists), so Plex collection names cannot be recreated on Simkl and **Liked Lists** remains unavailable for this provider.
 
 ### Backup and restore
 
@@ -314,13 +317,15 @@ After selecting a user, you'll see a confirmation message indicating that the us
 
 ## Personalized Sync Direction
 
-Owner users can choose how each sync type flows between Plex and the selected provider. For Watched History, Liked Lists, Watchlists, Collections and Ratings you may select:
+Owner users can choose how each supported sync type flows between Plex and the selected provider. For Watched History, Watchlists, Ratings, and Trakt Collections/Liked Lists you may select:
 
 - **Bidirectional** – changes are mirrored both ways.
 - **Plex → Trakt/Simkl** – only send data from Plex to the service.
 - **Trakt/Simkl → Plex** – only import data from the service into Plex.
 
 Managed users always use the Plex → service direction.
+
+Simkl Collection is always one-way: **Plex → Simkl Plan to Watch**. Simkl Custom Lists cannot be synchronized until Simkl exposes them through its public API.
 
 ## Screenshots
 
@@ -333,4 +338,3 @@ Below are a few images of the PlexyTrack web interface.
   <img src="screenshots/Screenshot%203.png" alt="Screenshot 3" width="400" />
   <img src="screenshots/Screenshot%204.png" alt="Screenshot 4" width="400" />
 </p>
-

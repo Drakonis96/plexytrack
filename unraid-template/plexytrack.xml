@@ -14,7 +14,7 @@
   <Project>https://github.com/Drakonis96/plexytrack</Project>
   <ReadMe>https://github.com/Drakonis96/plexytrack/blob/main/README.md</ReadMe>
   <TemplateURL>https://raw.githubusercontent.com/Drakonis96/plexytrack-unraid-template/main/plexytrack.xml</TemplateURL>
-  <Overview>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. It supports bidirectional sync of watched history, ratings, collections, liked lists and watchlists. A simple web UI lets you configure sync options, select Plex users, and create backups of your data. Live Sync via Plex webhooks is also available for instant updates. After installing the container, open the WebUI to authenticate Plex and then connect Trakt and/or Simkl.</Overview>
+  <Overview>PlexyTrack synchronizes your Plex library with Trakt and/or Simkl. Watched history, ratings, and watchlists support both providers. Trakt collections and named lists can sync in both directions; with Simkl, missing Plex library titles can be added one-way to Plan to Watch while existing Simkl statuses are preserved. Simkl Custom Lists are not available through its public API. A simple web UI lets you configure sync options, select Plex users, and create backups of your data. Live Sync via Plex webhooks is also available for instant updates. After installing the container, open the WebUI to authenticate Plex and then connect Trakt and/or Simkl.</Overview>
   <Category>MediaApp:Other</Category>
   <WebUI>http://[IP]:[PORT:5030]</WebUI>
   <Icon>https://raw.githubusercontent.com/Drakonis96/plexytrack/main/static/logo2.png</Icon>

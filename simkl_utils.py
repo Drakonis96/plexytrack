@@ -24,7 +24,7 @@ from utils import (
 logger = logging.getLogger(__name__)
 
 APP_NAME = "PlexyTrack"
-APP_VERSION = "v0.5.3"
+APP_VERSION = "v0.5.5"
 USER_AGENT = f"{APP_NAME} / {APP_VERSION}"
 CONFIG_DIR = os.environ.get("PLEXYTRACK_CONFIG_DIR", "/config")
 STATE_DIR = os.environ.get("PLEXYTRACK_STATE_DIR", "/state")
@@ -251,6 +251,122 @@ def get_simkl_watchlist(headers: dict, media_type: str = "all") -> dict:
     if isinstance(data, list):
         return {media_type: data}
     return {}
+
+
+def _simkl_collection_identity(media_type: str, item: dict) -> set:
+    """Return stable identity tokens for a Plex or Simkl media item."""
+    tokens = set()
+    ids = item.get("ids", {}) or {}
+    for key, value in ids.items():
+        if value not in (None, ""):
+            normalized_key = "simkl" if key == "simkl_id" else key
+            tokens.add((media_type, "id", normalized_key, str(value)))
+
+    title = " ".join(str(item.get("title") or "").casefold().split())
+    if title:
+        tokens.add(
+            (media_type, "title", title, normalize_year(item.get("year")))
+        )
+    return tokens
+
+
+def _simkl_tracked_collection_identities(data: dict) -> set:
+    """Index every title already tracked by Simkl, regardless of status."""
+    identities = set()
+    for bucket, media_type, object_keys in (
+        ("movies", "movie", ("movie",)),
+        ("shows", "show", ("show",)),
+        ("anime", "show", ("show", "anime")),
+    ):
+        for entry in data.get(bucket, []) or []:
+            media = {}
+            for object_key in object_keys:
+                media = entry.get(object_key, {}) or {}
+                if media:
+                    break
+            if not media and isinstance(entry, dict):
+                media = entry
+            identities.update(_simkl_collection_identity(media_type, media))
+    return identities
+
+
+def _simkl_not_found_count(response: dict) -> int:
+    """Count unresolved titles in an add-to-list response."""
+    not_found = response.get("not_found", {}) if isinstance(response, dict) else {}
+    if not isinstance(not_found, dict):
+        return 0
+    count = 0
+    for value in not_found.values():
+        if isinstance(value, list):
+            count += len(value)
+        elif isinstance(value, int):
+            count += value
+    return count
+
+
+def sync_plex_collection_to_simkl(
+    plex, headers: dict, *, batch_size: int = 500
+) -> int:
+    """Add missing Plex library titles to Simkl's Plan to Watch list.
+
+    Simkl's public API does not expose named Custom Lists or an ownership-style
+    collection. Its supported equivalent for an unwatched library import is
+    ``plantowatch``. Existing Simkl titles are skipped regardless of their
+    current status so this sync never moves completed, watching, held, or
+    dropped items back to Plan to Watch.
+
+    Returns the number of titles accepted by Simkl.
+    """
+    tracked_identities = _simkl_tracked_collection_identities(
+        get_simkl_watchlist(headers)
+    )
+    queued_identities = set(tracked_identities)
+    queued = []
+
+    for section in plex.library.sections():
+        if section.type not in ("movie", "show"):
+            continue
+        for item in section.all():
+            media_type = "movie" if section.type == "movie" else "show"
+            payload_item: Dict[str, Union[str, int, dict]] = {
+                "title": getattr(item, "title", "")
+            }
+            year = normalize_year(getattr(item, "year", None))
+            if year is not None:
+                payload_item["year"] = year
+            guid = best_guid(item)
+            ids = guid_to_ids(guid) if guid else {}
+            if ids:
+                payload_item["ids"] = ids
+
+            identities = _simkl_collection_identity(media_type, payload_item)
+            if identities & queued_identities:
+                continue
+            queued.append((media_type, payload_item))
+            queued_identities.update(identities)
+
+    accepted = 0
+    for start in range(0, len(queued), batch_size):
+        batch = queued[start:start + batch_size]
+        movies = [item for media_type, item in batch if media_type == "movie"]
+        shows = [item for media_type, item in batch if media_type == "show"]
+        response = add_items_to_simkl_list(
+            headers,
+            movies=movies or None,
+            shows=shows or None,
+            target_list="plantowatch",
+        )
+        accepted += max(0, len(batch) - _simkl_not_found_count(response))
+
+    if queued:
+        logger.info(
+            "Plex collection -> Simkl Plan to Watch: added %d of %d missing title(s)",
+            accepted,
+            len(queued),
+        )
+    else:
+        logger.info("Plex collection -> Simkl: no missing titles")
+    return accepted
 
 
 def sync_plex_watchlist_to_simkl(plex, headers: dict, target_list: str = "plantowatch") -> int:

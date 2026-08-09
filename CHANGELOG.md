@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.5 (2026-08-09)
+
+### Simkl collection sync
+
+- **Plex collection import for Simkl** (#248): the Collection checkbox is now available when Simkl is selected. PlexyTrack adds movies and shows that are present in the Plex library but not yet tracked by Simkl to **Plan to Watch**.
+- **Status-safe reconciliation**: titles already present anywhere in the Simkl library are skipped, so `watching`, `completed`, `hold`, and `dropped` statuses are never moved back to Plan to Watch.
+- **Honest provider controls**: Simkl collection sync is shown as Plex → Simkl only. Liked Lists remains disabled because Simkl's public API does not yet expose named Custom Lists.
+
+### Documentation
+
+- Clarified the different collection/list capabilities provided by Trakt and Simkl in the README and Unraid template.
+
+### Tests
+
+- Added regression coverage for missing-title imports, status preservation, batching, unresolved Simkl matches, no-op runs, and the enabled Simkl UI control.
+
 ## v0.5.4 (2026-07-21)
 
 ### Watchlist sync
