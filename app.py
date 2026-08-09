@@ -4568,6 +4568,13 @@ def startup_init() -> None:
         logger.warning(
             "No last sync timestamp and history sync disabled; entering SAFE-MODE"
         )
+    # Auto-resume the periodic sync job on boot. Upstream only starts the
+    # scheduler from the manual "Schedule Sync" button (session-scoped), so a
+    # container restart/recreate silently drops the interval job. If a user
+    # was already selected on a previous run, that's a signal sync was
+    # deliberately enabled -- restore it without requiring a UI click.
+    if not SAFE_MODE and load_selected_user():
+        start_scheduler()
 
 
 if __name__ == "__main__":
