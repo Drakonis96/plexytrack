@@ -134,12 +134,16 @@
             <fieldset class="sync-options">
               <legend>Sync Options</legend>
               <div class="checkbox-group">
-                <input type="checkbox" id="collection" name="collection" {% if collection %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
+                <input type="checkbox" id="collection" name="collection" {% if collection %}checked{% endif %}>
                 <label for="collection">Collection</label>
                 <select id="collection_direction" name="collection_direction" class="direction-select">
+                  {% if provider == 'simkl' %}
+                  <option value="plex_to_service" selected>Plex → Simkl Plan to Watch</option>
+                  {% else %}
                   <option value="both" {% if collection_direction == 'both' %}selected{% endif %}>Bidirectional</option>
                   <option value="plex_to_service" {% if collection_direction == 'plex_to_service' %}selected{% endif %}>Plex → {{ provider.capitalize() }}</option>
                   <option value="service_to_plex" {% if collection_direction == 'service_to_plex' %}selected{% endif %}>{{ provider.capitalize() }} → Plex</option>
+                  {% endif %}
                 </select>
               </div>
               <div class="checkbox-group">
@@ -161,7 +165,7 @@
                 </select>
               </div>
               <div class="checkbox-group">
-                <input type="checkbox" id="liked_lists" name="liked_lists" {% if liked_lists %}checked{% endif %} {% if provider == 'simkl' %}disabled{% endif %}>
+                <input type="checkbox" id="liked_lists" name="liked_lists" {% if liked_lists %}checked{% endif %} {% if provider == 'simkl' %}disabled data-provider-disabled{% endif %}>
                 <label for="liked_lists">Liked Lists</label>
                 <select id="lists_direction" name="lists_direction" class="direction-select">
                   <option value="both" {% if lists_direction == 'both' %}selected{% endif %}>Bidirectional</option>
