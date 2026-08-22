@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.5.6 (2026-08-22)
+
+### Plex watched-history performance
+
+- **Bulk episode resolution** (#253): service-to-Plex imports now fetch and index each TV library's episodes once instead of repeating section, show, and episode lookups for every watched episode.
+- **Fast fallback matching**: episodes are indexed by external GUID and by normalized show/season/episode position. If a bulk query is unavailable, PlexyTrack caches one episode listing per show instead of querying the show for every item.
+- **Correct watched-state checks**: PlexAPI's `isWatched` property is no longer called as a function, eliminating unnecessary title searches for movies that were already found by GUID.
+- **Visible progress**: large Plex watched-state updates now log progress every 100 processed items instead of appearing stuck after the GUID-index message.
+
+### Tests
+
+- Added regression coverage for bulk episode indexing, tuple-based Simkl episode keys, the cached compatibility fallback, and PlexAPI watched-state properties.
+- Verified the fix with both the minimum supported PlexAPI 4.15.0 and the current PlexAPI 4.18.2.
+
 ## v0.5.5 (2026-08-09)
 
 ### Simkl collection sync
