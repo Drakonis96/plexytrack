@@ -983,17 +983,23 @@ def update_plex(
     movies: Set[Tuple[str, Optional[int], Optional[str]]],
     episodes: Set[Tuple[str, str, object]],
 ) -> None:
-    """Mark items as watched in Plex when missing."""
+    """Mark Simkl items watched only when their external IDs match Plex.
+
+    A Simkl episode key is either an episode GUID or ``(show_guid, code)``.
+    Resolve tuple keys through the exact Plex show before applying the season
+    and episode coordinates.  Never fall back to a title match: unrelated
+    shows can share a title, as the anime and live-action ``One Piece`` do.
+    """
     movie_count = 0
     episode_count = 0
     total_items = len(movies) + len(episodes)
 
     # A TV-section query can return every episode, including its external
-    # GUIDs, in one paginated operation.  Build both lookup shapes once so a
-    # large Simkl import does not execute section/show/allLeaves requests for
-    # every episode individually.
+    # GUIDs and parent rating keys in one paginated operation. Build both
+    # lookup shapes once so a large Simkl import does not execute
+    # section/show/allLeaves requests for every episode individually.
     episode_guid_lookup: Dict[str, object] = {}
-    episode_position_lookup: Dict[Tuple[str, int, int], object] = {}
+    episode_show_position_lookup: Dict[Tuple[str, int, int], object] = {}
     if episodes:
         for section in plex.library.sections():
             if section.type != "show":
@@ -1026,18 +1032,37 @@ def update_plex(
                     ),
                     getattr(episode, "index", getattr(episode, "episodeNumber", None)),
                 )
-                if position_key:
-                    episode_position_lookup[position_key] = episode
+                parent_rating_key = getattr(episode, "grandparentRatingKey", None)
+                if position_key and parent_rating_key is not None:
+                    episode_show_position_lookup[
+                        (str(parent_rating_key), position_key[1], position_key[2])
+                    ] = episode
 
         logger.info(
-            "Built Plex episode lookup with %d GUID entries and %d episode positions",
+            "Built Plex episode lookup with %d GUID entries and %d exact show positions",
             len(episode_guid_lookup),
-            len(episode_position_lookup),
+            len(episode_show_position_lookup),
         )
 
-    # Only used if the bulk episode query was unavailable or an item lacked
-    # usable metadata.  Cache all leaves per show so even the compatibility
-    # fallback performs at most one remote lookup per show.
+    # Resolve each incoming show GUID at most once. The existing GUID index
+    # scans Plex shows once and then performs O(1) exact lookups.
+    resolved_show_lookup: Dict[str, Optional[object]] = {}
+
+    def resolve_show(show_guid: str) -> Optional[object]:
+        if show_guid not in resolved_show_lookup:
+            try:
+                show_obj = find_item_by_guid(plex, show_guid)
+                if show_obj and getattr(show_obj, "type", "show") != "show":
+                    show_obj = None
+            except Exception as exc:
+                logger.debug("Show GUID search failed for %s: %s", show_guid, exc)
+                show_obj = None
+            resolved_show_lookup[show_guid] = show_obj
+        return resolved_show_lookup[show_guid]
+
+    # Only used if the bulk episode query was unavailable or its episode rows
+    # lacked parent rating keys. Cache all leaves per exact show GUID so the
+    # compatibility path still performs at most one remote lookup per show.
     fallback_episode_lookup: Dict[str, Dict[Tuple[int, int], object]] = {}
 
     def log_progress(processed: int) -> None:
@@ -1056,47 +1081,39 @@ def update_plex(
         if guid and valid_guid(guid):
             try:
                 item = find_item_by_guid(plex, guid)
-                if item and _is_watched(item):
-                    continue
-                if item:
+                if item and getattr(item, "type", "movie") == "movie":
+                    if _is_watched(item):
+                        continue
                     item.markWatched()
                     movie_count += 1
                     continue
             except Exception as exc:
                 logger.debug("GUID search failed for %s: %s", guid, exc)
 
-        found = None
-        for section in plex.library.sections():
-            if section.type != "movie":
-                continue
-            try:
-                results = section.search(title=title)
-                for candidate in results:
-                    if year is None or normalize_year(getattr(candidate, "year", None)) == normalize_year(year):
-                        found = candidate
-                        break
-                if found:
-                    break
-            except Exception as exc:
-                logger.debug("Search failed in section %s: %s", section.title, exc)
-
-        if not found:
-            logger.debug("Movie not found in Plex library: %s (%s)", title, year)
-            continue
-
-        try:
-            if _is_watched(found):
-                continue
-            found.markWatched()
-            movie_count += 1
-        except Exception as exc:
-            logger.debug("Failed to mark movie '%s' as watched: %s", found.title, exc)
+        if guid:
+            logger.warning(
+                "Skipping unmatched Simkl movie '%s' (%s): "
+                "no Plex movie with GUID %s",
+                title,
+                year,
+                guid,
+            )
+        else:
+            logger.warning(
+                "Skipping unmatched Simkl movie '%s' (%s): "
+                "no external GUID available",
+                title,
+                year,
+            )
 
     for episode_index, (show_title, code, key) in enumerate(episodes, start=1):
         log_progress(len(movies) + episode_index - 1)
-        guid: Optional[str] = None
-        if isinstance(key, str):
-            guid = key if valid_guid(key) else None
+        episode_guid: Optional[str] = None
+        show_guid: Optional[str] = None
+        if isinstance(key, str) and valid_guid(key):
+            episode_guid = key
+        elif isinstance(key, tuple) and key and valid_guid(key[0]):
+            show_guid = key[0]
 
         try:
             season_num, episode_num = map(int, code.upper().lstrip("S").split("E"))
@@ -1104,11 +1121,14 @@ def update_plex(
             logger.debug("Invalid episode code format: %s", code)
             continue
 
-        item = episode_guid_lookup.get(guid) if guid else None
-        if item is None:
-            position_key = _episode_position_key(show_title, season_num, episode_num)
-            if position_key:
-                item = episode_position_lookup.get(position_key)
+        item = episode_guid_lookup.get(episode_guid) if episode_guid else None
+        show_obj = resolve_show(show_guid) if show_guid else None
+        if item is None and show_obj is not None:
+            show_rating_key = getattr(show_obj, "ratingKey", None)
+            if show_rating_key is not None:
+                item = episode_show_position_lookup.get(
+                    (str(show_rating_key), season_num, episode_num)
+                )
 
         if item is not None:
             try:
@@ -1121,40 +1141,62 @@ def update_plex(
                 logger.debug("Failed marking episode %s - %s as watched: %s", show_title, code, exc)
                 continue
 
-        normalized_show_title = " ".join((show_title or "").casefold().split())
-        if not normalized_show_title:
-            logger.debug("Episode has no show title and cannot be matched: %s", code)
-            continue
-        if normalized_show_title not in fallback_episode_lookup:
+        if show_guid and show_obj is not None and show_guid not in fallback_episode_lookup:
             show_episodes: Dict[Tuple[int, int], object] = {}
-            show_obj = get_show_from_library(plex, show_title)
-            if show_obj:
-                try:
-                    for show_episode in show_obj.episodes():
-                        show_episode_key = _episode_position_key(
-                            show_title,
-                            getattr(
-                                show_episode,
-                                "parentIndex",
-                                getattr(show_episode, "seasonNumber", None),
-                            ),
-                            getattr(
-                                show_episode,
-                                "index",
-                                getattr(show_episode, "episodeNumber", None),
-                            ),
-                        )
-                        if show_episode_key:
-                            show_episodes[(show_episode_key[1], show_episode_key[2])] = show_episode
-                except Exception as exc:
-                    logger.debug("Failed loading episodes for show %s: %s", show_title, exc)
-            fallback_episode_lookup[normalized_show_title] = show_episodes
+            try:
+                for show_episode in show_obj.episodes():
+                    show_episode_key = _episode_position_key(
+                        show_title,
+                        getattr(
+                            show_episode,
+                            "parentIndex",
+                            getattr(show_episode, "seasonNumber", None),
+                        ),
+                        getattr(
+                            show_episode,
+                            "index",
+                            getattr(show_episode, "episodeNumber", None),
+                        ),
+                    )
+                    if show_episode_key:
+                        show_episodes[(show_episode_key[1], show_episode_key[2])] = show_episode
+            except Exception as exc:
+                logger.debug(
+                    "Failed loading episodes for show GUID %s: %s",
+                    show_guid,
+                    exc,
+                )
+            fallback_episode_lookup[show_guid] = show_episodes
 
-        ep_obj = fallback_episode_lookup[normalized_show_title].get(
-            (season_num, episode_num)
+        ep_obj = (
+            fallback_episode_lookup.get(show_guid, {}).get((season_num, episode_num))
+            if show_guid
+            else None
         )
         if ep_obj is None:
-            logger.debug("Episode not found in Plex library: %s - %s", show_title, code)
+            if episode_guid:
+                logger.warning(
+                    "Skipping unmatched Simkl episode '%s' %s: "
+                    "no Plex episode with GUID %s",
+                    show_title,
+                    code,
+                    episode_guid,
+                )
+            elif show_guid:
+                logger.warning(
+                    "Skipping unmatched Simkl episode '%s' %s: "
+                    "no Plex episode under show GUID %s",
+                    show_title,
+                    code,
+                    show_guid,
+                )
+            else:
+                logger.warning(
+                    "Skipping unmatched Simkl episode '%s' %s: "
+                    "no usable external GUID available",
+                    show_title,
+                    code,
+                )
             continue
         try:
             if _is_watched(ep_obj):

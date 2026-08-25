@@ -11,6 +11,7 @@ class DummyEpisode:
         self.guid = f"plex://episode/{number}"
         self.guids = [SimpleNamespace(id=f"tvdb://{1000 + number}")]
         self.grandparentTitle = "Example Show"
+        self.grandparentRatingKey = "show-1"
         self.parentIndex = 1
         self.index = number
         self.isWatched = False
@@ -49,7 +50,7 @@ class DummyLibrary:
         return [self._section]
 
 
-def test_update_plex_bulk_indexes_episodes_once():
+def test_update_plex_bulk_indexes_episodes_once(monkeypatch):
     counters = {
         "section_queries": 0,
         "bulk_episode_queries": 0,
@@ -59,6 +60,12 @@ def test_update_plex_bulk_indexes_episodes_once():
     library_episodes = [DummyEpisode(number, counters) for number in range(1, 101)]
     section = DummyShowSection(library_episodes, counters)
     plex = SimpleNamespace(library=DummyLibrary(section, counters))
+    exact_show = SimpleNamespace(type="show", ratingKey="show-1")
+    monkeypatch.setattr(
+        plex_utils,
+        "find_item_by_guid",
+        lambda _plex, guid: exact_show if guid == "tvdb://1" else None,
+    )
     service_episodes = {
         (
             "Example Show",
@@ -82,6 +89,8 @@ def test_update_plex_bulk_indexes_episodes_once():
 
 class DummyFallbackShow:
     title = "Example Show"
+    type = "show"
+    ratingKey = "show-1"
 
     def __init__(self, episodes, counters):
         self._episodes = episodes
@@ -106,7 +115,7 @@ class DummyFallbackSection(DummyShowSection):
         return self._show
 
 
-def test_update_plex_fallback_queries_each_show_once():
+def test_update_plex_fallback_queries_each_show_once(monkeypatch):
     counters = {
         "section_queries": 0,
         "bulk_episode_queries": 0,
@@ -117,6 +126,11 @@ def test_update_plex_fallback_queries_each_show_once():
     library_episodes = [DummyEpisode(number, counters) for number in range(1, 101)]
     section = DummyFallbackSection(library_episodes, counters)
     plex = SimpleNamespace(library=DummyLibrary(section, counters))
+    monkeypatch.setattr(
+        plex_utils,
+        "find_item_by_guid",
+        lambda _plex, guid: section._show if guid == "tvdb://1" else None,
+    )
     service_episodes = {
         ("Example Show", f"S01E{number:02d}", ("tvdb://1", f"S01E{number:02d}"))
         for number in range(1, 101)
@@ -125,9 +139,9 @@ def test_update_plex_fallback_queries_each_show_once():
     plex_utils.update_plex(plex, set(), service_episodes)
 
     assert counters == {
-        "section_queries": 2,
+        "section_queries": 1,
         "bulk_episode_queries": 1,
-        "show_queries": 1,
+        "show_queries": 0,
         "show_episode_queries": 1,
         "mark_watched": 100,
     }

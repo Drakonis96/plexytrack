@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.7 (2026-08-25)
+
+### Strict Simkl matching
+
+- **External-ID-only history import** (#255): Simkl movies and episodes are now applied to Plex only when their IMDb, TMDB, TVDB, or AniDB identifiers resolve to the expected media type. Unmatched items are skipped and logged instead of falling back to a potentially ambiguous title.
+- **Exact episode parent resolution**: tuple-based Simkl episode keys now resolve the Plex show by GUID first, then select the episode by season and number. This prevents identically named series, such as the anime and live-action versions of *One Piece*, from sharing watched state.
+- **Performance preserved**: strict episode matching extends the bulk index introduced in v0.5.6 with Plex parent rating keys, retaining one bulk episode load per TV library and one cached fallback load per exact show.
+
+### Tests
+
+- Added regression coverage for duplicate show titles, unknown show and movie GUIDs, bulk exact-parent matching, and the cached strict fallback path.
+
 ## v0.5.6 (2026-08-22)
 
 ### Plex watched-history performance
